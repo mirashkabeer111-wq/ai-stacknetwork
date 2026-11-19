@@ -4,23 +4,26 @@ const path = require("path");
 
 const app = express();
 
-// Middleware
 app.use(express.json({ limit: "1mb" }));
-
-// Serve website files from public folder
 app.use(express.static(path.join(__dirname, "public")));
 
-// Groq AI Chat API
 app.post("/api/chat", async (req, res) => {
     try {
-        const { messages } = req.body;
+        const {
+            messages,
+            instructions = "",
+            answerLength = "short",
+            mode = "fast"
+        } = req.body || {};
 
+        // Check API key
         if (!process.env.GROQ_API_KEY) {
             return res.status(500).json({
                 error: "Groq API key is not configured on Render."
             });
         }
 
+        // Validate messages
         if (
             !Array.isArray(messages) ||
             messages.length === 0 ||
@@ -43,6 +46,55 @@ app.post("/api/chat", async (req, res) => {
             });
         }
 
+        // Validate options
+        const length = ["short", "long"].includes(answerLength)
+            ? answerLength
+            : "short";
+
+        const selectedMode = ["fast", "thinking"].includes(mode)
+            ? mode
+            : "fast";
+
+        // Limit custom instructions
+        const safeInstructions =
+            typeof instructions === "string"
+                ? instructions.slice(0, 4000)
+                : "";
+
+        // Answer length instructions
+        const lengthInstruction =
+            length === "long"
+                ? "Give detailed, complete answers with explanations and examples when useful."
+                : "Give short, direct answers. Avoid unnecessary details.";
+
+        // Response mode instructions
+        const modeInstruction =
+            selectedMode === "thinking"
+                ? "Work carefully through the problem internally. Check your answer before responding. Do not reveal private chain-of-thought; provide only the answer and a useful explanation."
+                : "Respond quickly and directly while maintaining accuracy.";
+
+        // System instructions
+        const systemPrompt = `
+You are StackNetwork AI, a helpful, friendly and intelligent AI assistant.
+
+DEVELOPER:
+Your developer is Muhammad Ashmil.
+If someone asks who developed, created or made you, answer:
+"I was developed by Muhammad Ashmil."
+
+ANSWER LENGTH:
+${lengthInstruction}
+
+RESPONSE MODE:
+${modeInstruction}
+
+CUSTOM USER INSTRUCTIONS:
+${safeInstructions || "No additional custom instructions."}
+
+Follow appropriate user preferences while maintaining accuracy and safety.
+`;
+
+        // Send request to Groq
         const response = await fetch(
             "https://api.groq.com/openai/v1/chat/completions",
             {
@@ -53,16 +105,16 @@ app.post("/api/chat", async (req, res) => {
                 },
                 body: JSON.stringify({
                     model: process.env.GROQ_MODEL ||
-                        "llama-3.3-70b-versatile",
+                        "openai/gpt-oss-120b",
                     messages: [
                         {
                             role: "system",
-                            content: "You are StackNetwork AI, a helpful and friendly AI assistant."
+                            content: systemPrompt
                         },
                         ...messages
                     ],
-                    temperature: 0.7,
-                    max_tokens: 2048
+                    temperature: selectedMode === "thinking" ? 0.4 : 0.7,
+                    max_tokens: length === "long" ? 4096 : 1024
                 })
             }
         );
@@ -73,7 +125,8 @@ app.post("/api/chat", async (req, res) => {
             console.error("Groq API error:", data);
 
             return res.status(response.status).json({
-                error: data.error?.message || "Groq API request failed."
+                error: data.error?.message ||
+                    "Groq API request failed."
             });
         }
 
@@ -85,20 +138,19 @@ app.post("/api/chat", async (req, res) => {
             });
         }
 
-        res.json({
+        return res.json({
             reply: answer
         });
 
     } catch (error) {
         console.error("Server error:", error);
 
-        res.status(500).json({
+        return res.status(500).json({
             error: "Internal server error."
         });
     }
 });
 
-// Start server
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
