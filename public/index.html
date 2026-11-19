@@ -3,573 +3,635 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>StackNetwork AI</title>
 
+<link rel="stylesheet"
+href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/styles/github-dark.min.css">
-<script src="https://cdn.jsdelivr.net/npm/highlight.js@11.11.1/lib/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 
 <style>
-*{box-sizing:border-box}
-:root{
- --bg:#212121;--side:#171717;--panel:#303030;--text:#f5f5f5;
- --muted:#aaa;--border:#414141;--hover:#363636;--accent:#fff;
+:root {
+  --bg:#ffffff;
+  --panel:#f7f7f8;
+  --text:#171717;
+  --muted:#777;
+  --border:#e5e5e5;
+  --accent:#111111;
 }
-body.light{
- --bg:#fff;--side:#f5f5f5;--panel:#f0f0f0;--text:#202020;
- --muted:#666;--border:#ddd;--hover:#e8e8e8;--accent:#202020;
+body.dark {
+  --bg:#212121;
+  --panel:#171717;
+  --text:#f5f5f5;
+  --muted:#aaa;
+  --border:#373737;
+  --accent:#ffffff;
 }
-body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,sans-serif;height:100dvh;overflow:hidden}
-button,select,textarea{font:inherit}
-button{cursor:pointer;color:var(--text)}
-.app{display:flex;height:100dvh}
-.sidebar{width:270px;background:var(--side);padding:16px;display:flex;flex-direction:column;gap:10px;flex-shrink:0;z-index:10}
-.brand{font-size:20px;font-weight:bold;padding:10px 4px}
-.sidebtn{background:transparent;border:1px solid var(--border);padding:11px;border-radius:9px;text-align:left}
-.sidebtn:hover{background:var(--hover)}
-.sidebottom{margin-top:auto;color:var(--muted);font-size:12px;line-height:1.7}
-.main{flex:1;min-width:0;display:flex;flex-direction:column;position:relative}
-.topbar{height:60px;display:flex;align-items:center;gap:12px;padding:0 18px;border-bottom:1px solid var(--border)}
-.menu{display:none;background:transparent;border:0;font-size:22px}
-.topname{font-weight:bold}
-.topactions{margin-left:auto;display:flex;align-items:center;gap:7px}
-select,.smallbtn{background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:8px;max-width:145px}
-.smallbtn{font-size:13px}
-.chat{flex:1;overflow-y:auto;padding:24px 18px 160px}
-.welcome{text-align:center;margin:14vh auto 0}
-.welcome h1{font-size:34px}
-.welcome p{color:var(--muted)}
-.messages{max-width:820px;margin:auto;display:flex;flex-direction:column;gap:26px}
-.message{display:flex;gap:12px;line-height:1.7;overflow-wrap:anywhere;min-width:0}
-.avatar{width:32px;height:32px;flex-shrink:0;border-radius:50%;background:#555;color:white;display:grid;place-items:center;font-size:12px}
-.content{flex:1;min-width:0;font-size:var(--chat-font,16px)}
-.content p:first-child{margin-top:0}
-.content pre{position:relative;overflow:auto;background:#111;border:1px solid #444;border-radius:10px;padding:40px 14px 14px}
-.content code{font-family:Consolas,monospace;font-size:.9em}
-.content :not(pre)>code{background:var(--panel);padding:2px 5px;border-radius:4px}
-.codecopy{position:absolute;top:8px;right:8px;background:#333;border:1px solid #666;border-radius:6px;padding:5px 9px;color:white;font-size:12px}
-.content a{color:#69aaff}
-.message-tools{display:flex;gap:7px;margin-top:10px;flex-wrap:wrap}
-.toolbtn{background:transparent;border:1px solid var(--border);border-radius:7px;padding:5px 9px;font-size:12px;color:var(--muted)}
-.toolbtn:hover{background:var(--hover);color:var(--text)}
-.composer-wrap{position:absolute;bottom:0;left:0;right:0;padding:14px 18px 18px;background:linear-gradient(transparent,var(--bg) 20%)}
-.composer{max-width:820px;margin:auto;background:var(--panel);border:1px solid var(--border);border-radius:18px;padding:10px;display:flex;gap:8px;align-items:flex-end}
-#prompt{flex:1;min-width:0;background:transparent;color:var(--text);border:0;outline:0;resize:none;min-height:30px;max-height:150px;padding:8px}
-#send{background:var(--accent);color:var(--bg);border:0;border-radius:10px;width:40px;height:40px;font-size:20px}
-#send:disabled{opacity:.4}
-.hint{text-align:center;color:var(--muted);font-size:11px;margin-top:8px}
-.overlay{display:none;position:fixed;inset:0;background:#0009;z-index:9}
-.overlay.show{display:block}
-.modal{display:none;position:fixed;inset:0;background:#0009;z-index:20;align-items:center;justify-content:center;padding:15px}
-.modalbox{width:min(540px,100%);max-height:90dvh;overflow:auto;background:var(--side);color:var(--text);border:1px solid var(--border);border-radius:15px;padding:20px}
-.modalbox h2{margin-top:0}
-.modalbox label{display:block;margin:13px 0 6px;font-size:13px;color:var(--muted)}
-.modalbox textarea,.modalbox select,.modalbox input{width:100%;max-width:none;background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:10px}
-.modalbox textarea{height:120px;resize:vertical}
-.modalactions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
-.modalactions button{background:var(--accent);color:var(--bg);border:0;border-radius:8px;padding:10px 14px}
-.modalactions .secondary{background:var(--panel);color:var(--text);border:1px solid var(--border)}
-.status{color:var(--muted);font-size:12px;text-align:center;margin-top:7px}
-@media(max-width:760px){
- .sidebar{position:fixed;left:-290px;top:0;bottom:0;width:270px;transition:left .2s}
- .sidebar.open{left:0}
- .menu{display:block}
- .topbar{padding:0 10px;gap:7px}
- .topname{font-size:14px}
- .topactions{gap:4px}
- select,.smallbtn{max-width:105px;padding:7px 5px;font-size:11px}
- .chat{padding:18px 12px 155px}
- .welcome{margin-top:17vh}
- .welcome h1{font-size:27px}
- .composer-wrap{padding:10px 9px 14px}
- .message{gap:8px}
- .content{font-size:var(--chat-font,15px)}
+* { box-sizing:border-box; }
+body {
+  margin:0;
+  font-family:Arial,sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  height:100vh;
+  overflow:hidden;
 }
-@media(max-width:390px){
- .topname{display:none}
- select{max-width:100px}
+button,select,textarea,input { font:inherit; }
+button {
+  cursor:pointer;
+  border:1px solid var(--border);
+  border-radius:9px;
+  padding:9px 12px;
+  color:var(--text);
+  background:var(--bg);
+}
+button:hover { background:var(--panel); }
+.app { display:flex; height:100vh; }
+.sidebar {
+  width:260px;
+  background:var(--panel);
+  border-right:1px solid var(--border);
+  padding:16px;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+.brand { font-size:20px;font-weight:bold;padding:8px 4px; }
+.new-chat { width:100%;text-align:left; }
+.sidebar-bottom { margin-top:auto; }
+.main { flex:1;display:flex;flex-direction:column;min-width:0; }
+.topbar {
+  height:58px;
+  border-bottom:1px solid var(--border);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 18px;
+}
+.top-actions { display:flex;gap:8px; }
+.mobile-menu { display:none; }
+.chat {
+  flex:1;
+  overflow-y:auto;
+  padding:25px 16px 35px;
+}
+.messages {
+  max-width:850px;
+  margin:auto;
+}
+.welcome {
+  text-align:center;
+  margin:90px auto 30px;
+}
+.welcome h1 { font-size:30px; }
+.welcome p { color:var(--muted); }
+.message {
+  display:flex;
+  gap:13px;
+  margin:25px 0;
+  line-height:1.65;
+}
+.avatar {
+  width:32px;
+  height:32px;
+  border-radius:50%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:var(--panel);
+  flex-shrink:0;
+  font-size:14px;
+}
+.content { min-width:0;flex:1;overflow-wrap:anywhere; }
+.content pre {
+  background:#111;
+  color:#eee;
+  padding:16px;
+  border-radius:10px;
+  overflow:auto;
+}
+.content code { font-family:Consolas,monospace; }
+.content :not(pre) > code {
+  background:var(--panel);
+  padding:3px 5px;
+  border-radius:4px;
+}
+.composer-area {
+  padding:12px 16px 18px;
+}
+.composer {
+  max-width:850px;
+  margin:auto;
+  border:1px solid var(--border);
+  border-radius:17px;
+  padding:12px;
+  background:var(--bg);
+  box-shadow:0 2px 12px #0000000a;
+}
+#prompt {
+  width:100%;
+  border:0;
+  outline:0;
+  resize:none;
+  min-height:55px;
+  max-height:180px;
+  background:transparent;
+  color:var(--text);
+  padding:8px;
+}
+.composer-footer {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+.composer-footer small { color:var(--muted); }
+.send-btn {
+  background:var(--accent);
+  color:var(--bg);
+  border:0;
+  padding:10px 18px;
+}
+.stop-btn { display:none; }
+.settings {
+  display:none;
+  position:fixed;
+  inset:0;
+  background:#0008;
+  z-index:10;
+  align-items:center;
+  justify-content:center;
+  padding:15px;
+}
+.settings-card {
+  width:100%;
+  max-width:450px;
+  max-height:90vh;
+  overflow:auto;
+  background:var(--bg);
+  border:1px solid var(--border);
+  border-radius:15px;
+  padding:20px;
+}
+.settings-card h2 { margin-top:0; }
+.field { margin:15px 0; }
+.field label {
+  display:block;
+  margin-bottom:7px;
+  font-size:13px;
+  color:var(--muted);
+}
+.field select,.field textarea,.field input {
+  width:100%;
+  padding:10px;
+  border:1px solid var(--border);
+  border-radius:8px;
+  background:var(--bg);
+  color:var(--text);
+}
+.field textarea { min-height:100px;resize:vertical; }
+.settings-actions {
+  display:flex;
+  justify-content:flex-end;
+  gap:8px;
+}
+.status {
+  text-align:center;
+  font-size:12px;
+  color:var(--muted);
+  margin-top:9px;
+}
+body.large-font .content { font-size:19px; }
+body.small-font .content { font-size:14px; }
+
+@media(max-width:700px) {
+  .sidebar {
+    position:fixed;
+    z-index:5;
+    left:-270px;
+    top:0;
+    bottom:0;
+    transition:left .2s;
+  }
+  .sidebar.open { left:0; }
+  .mobile-menu { display:inline-block; }
+  .topbar { padding:0 10px; }
+  .chat { padding:15px 12px; }
+  .welcome { margin-top:65px; }
+  .welcome h1 { font-size:24px; }
+  .composer-area { padding:8px; }
 }
 </style>
 </head>
 
 <body>
 <div class="app">
+
 <aside class="sidebar" id="sidebar">
- <div class="brand">⚡ StackNetwork AI</div>
- <button class="sidebtn" id="newChat">＋ New Chat</button>
- <button class="sidebtn" id="openSettings">⚙ AI Settings</button>
- <button class="sidebtn" id="openInstructions">✎ Custom Instructions</button>
- <button class="sidebtn" id="exportChat">⇩ Export Chat</button>
- <button class="sidebtn" id="themeBtn">☀ / ☾ Change Theme</button>
- <div class="sidebottom">
-  <b>StackNetwork AI</b><br>
-  Developed by Muhammad Ashmil<br>
-  AI Assistant
- </div>
+  <div class="brand">⚡ StackNetwork AI</div>
+  <button class="new-chat" id="newChat">＋ New Chat</button>
+  <div class="sidebar-bottom">
+    <button style="width:100%" id="settingsBtn">⚙️ AI Settings</button>
+    <button style="width:100%;margin-top:8px" id="instructionsBtn">📝 Custom Instructions</button>
+    <p style="font-size:11px;color:var(--muted);text-align:center">
+      Developed by Muhammad Ashmil
+    </p>
+  </div>
 </aside>
 
-<div class="overlay" id="overlay"></div>
-
 <main class="main">
- <header class="topbar">
-  <button class="menu" id="menuBtn">☰</button>
-  <div class="topname">StackNetwork AI</div>
-  <div class="topactions">
-   <button class="smallbtn" id="searchBtn" title="Toggle web search">🌐 Search: Off</button>
-   <button class="smallbtn" id="voiceBtn" title="Voice input">🎙</button>
-  </div>
- </header>
+  <header class="topbar">
+    <div>
+      <button class="mobile-menu" id="menuBtn">☰</button>
+      <strong>StackNetwork AI</strong>
+    </div>
+    <div class="top-actions">
+      <button id="themeBtn">☀️</button>
+      <button id="exportBtn">Export</button>
+    </div>
+  </header>
 
- <section class="chat" id="chat">
-  <div class="welcome" id="welcome">
-   <h1>What can I help with?</h1>
-   <p>Welcome to StackNetwork AI</p>
-  </div>
-  <div class="messages" id="messages"></div>
- </section>
+  <section class="chat" id="chat">
+    <div class="messages" id="messages">
+      <div class="welcome" id="welcome">
+        <h1>What can I help with?</h1>
+        <p>Welcome to StackNetwork AI</p>
+      </div>
+    </div>
+  </section>
 
- <div class="composer-wrap">
-  <div class="composer">
-   <textarea id="prompt" rows="1" placeholder="Message StackNetwork AI..."></textarea>
-   <button id="send" title="Send">↑</button>
-  </div>
-  <div class="status" id="status">Enter to send · Shift + Enter for new line</div>
-  <div class="hint">AI can make mistakes. Check important information.</div>
- </div>
+  <section class="composer-area">
+    <div class="composer">
+      <textarea id="prompt" placeholder="Message StackNetwork AI..."></textarea>
+      <div class="composer-footer">
+        <small>Enter to send · Shift + Enter for new line</small>
+        <div>
+          <button class="stop-btn" id="stopBtn">Stop</button>
+          <button class="send-btn" id="sendBtn">Send ↑</button>
+        </div>
+      </div>
+    </div>
+    <div class="status" id="status">
+      StackNetwork AI can make mistakes. Check important information.
+    </div>
+  </section>
 </main>
 </div>
 
-<div class="modal" id="settingsModal">
- <div class="modalbox">
-  <h2>AI Settings</h2>
+<!-- Settings -->
+<div class="settings" id="settingsModal">
+  <div class="settings-card">
+    <h2>⚙️ AI Settings</h2>
 
-  <label>AI Persona</label>
-  <select id="persona">
-   <option value="assistant">General Assistant</option>
-   <option value="coder">Coding Expert</option>
-   <option value="gaming">Gaming / Minecraft Expert</option>
-   <option value="teacher">Teacher</option>
-   <option value="creative">Creative Assistant</option>
-   <option value="professional">Professional Assistant</option>
-  </select>
+    <div class="field">
+      <label>AI Persona</label>
+      <select id="persona">
+        <option value="assistant">General Assistant</option>
+        <option value="coder">Programmer</option>
+        <option value="gaming">Gaming Expert</option>
+        <option value="teacher">Teacher</option>
+        <option value="creative">Creative</option>
+        <option value="professional">Professional</option>
+      </select>
+    </div>
 
-  <label>Response Style</label>
-  <select id="style">
-   <option value="friendly">Friendly</option>
-   <option value="professional">Professional</option>
-   <option value="simple">Simple English</option>
-   <option value="formal">Formal</option>
-   <option value="funny">Funny</option>
-  </select>
+    <div class="field">
+      <label>Response Style</label>
+      <select id="style">
+        <option value="friendly">Friendly</option>
+        <option value="professional">Professional</option>
+        <option value="simple">Simple</option>
+        <option value="formal">Formal</option>
+        <option value="funny">Funny</option>
+      </select>
+    </div>
 
-  <label>Answer Length</label>
-  <select id="answerLength">
-   <option value="short">Short</option>
-   <option value="medium">Medium</option>
-   <option value="long">Long</option>
-  </select>
+    <div class="field">
+      <label>Answer Length</label>
+      <select id="answerLength">
+        <option value="short">Short</option>
+        <option value="medium" selected>Medium</option>
+        <option value="long">Long</option>
+      </select>
+    </div>
 
-  <label>Response Mode</label>
-  <select id="mode">
-   <option value="fast">⚡ Fast Mode</option>
-   <option value="thinking">🧠 Thinking Mode</option>
-  </select>
+    <div class="field">
+      <label>Response Mode</label>
+      <select id="mode">
+        <option value="fast">⚡ Fast</option>
+        <option value="thinking">🧠 Thinking</option>
+      </select>
+    </div>
 
-  <label>AI Model</label>
-  <select id="model"></select>
+    <div class="field">
+      <label>AI Model</label>
+      <select id="model"></select>
+    </div>
 
-  <label>Font Size</label>
-  <select id="fontSize">
-   <option value="14">Small</option>
-   <option value="16" selected>Medium</option>
-   <option value="19">Large</option>
-   <option value="22">Extra Large</option>
-  </select>
+    <div class="field">
+      <label>Font Size</label>
+      <select id="fontSize">
+        <option value="normal">Normal</option>
+        <option value="small">Small</option>
+        <option value="large">Large</option>
+      </select>
+    </div>
 
-  <div class="modalactions">
-   <button id="saveSettings">Save Settings</button>
-   <button class="secondary" id="closeSettings">Close</button>
+    <div class="settings-actions">
+      <button id="closeSettings">Close</button>
+    </div>
   </div>
- </div>
 </div>
 
-<div class="modal" id="instructionsModal">
- <div class="modalbox">
-  <h2>Custom Instructions</h2>
-  <p>Tell StackNetwork AI how you want it to respond.</p>
-  <textarea id="instructions" placeholder="Example: Always answer in simple English. Explain Minecraft plugins step by step."></textarea>
-  <div class="modalactions">
-   <button id="saveInstructions">Save Instructions</button>
-   <button class="secondary" id="closeInstructions">Close</button>
+<!-- Custom Instructions -->
+<div class="settings" id="instructionsModal">
+  <div class="settings-card">
+    <h2>📝 Custom Instructions</h2>
+    <div class="field">
+      <label>Tell AI how to respond</label>
+      <textarea id="customInstructions"
+      placeholder="Example: Explain everything in simple English..."></textarea>
+    </div>
+    <div class="settings-actions">
+      <button id="closeInstructions">Cancel</button>
+      <button id="saveInstructions">Save</button>
+    </div>
   </div>
- </div>
 </div>
 
 <script>
 const $ = id => document.getElementById(id);
 
 let messages = [];
-let lastQuestion = "";
-let customInstructions = "";
-let webSearch = false;
-let activeController = null;
+let controller = null;
 let isGenerating = false;
-let recognition = null;
-let availableModels = [];
+let currentInstructions = "";
+let models = [];
+let defaultModel = "";
 
-marked.setOptions({gfm:true,breaks:true});
-
-function closeSidebar(){
- $("sidebar").classList.remove("open");
- $("overlay").classList.remove("show");
-}
-
-$("menuBtn").onclick = () => {
- $("sidebar").classList.toggle("open");
- $("overlay").classList.toggle("show");
-};
-$("overlay").onclick = closeSidebar;
-
-function openModal(id){ $(id).style.display="flex"; }
-function closeModal(id){ $(id).style.display="none"; }
-
-$("openSettings").onclick=()=>{closeSidebar();openModal("settingsModal")};
-$("openInstructions").onclick=()=>{closeSidebar();openModal("instructionsModal")};
-$("closeSettings").onclick=()=>closeModal("settingsModal");
-$("closeInstructions").onclick=()=>closeModal("instructionsModal");
-
-$("saveSettings").onclick=()=>{
- document.documentElement.style.setProperty("--chat-font",$("fontSize").value+"px");
- closeModal("settingsModal");
+const elements = {
+  prompt: $("prompt"),
+  messages: $("messages"),
+  send: $("sendBtn"),
+  stop: $("stopBtn"),
+  status: $("status")
 };
 
-$("saveInstructions").onclick=()=>{
- customInstructions=$("instructions").value;
- closeModal("instructionsModal");
-};
+async function loadConfig() {
+  try {
+    const response = await fetch("/api/config");
+    const config = await response.json();
 
-$("themeBtn").onclick=()=>{
- document.body.classList.toggle("light");
- localStorage.setItem("sn-theme",document.body.classList.contains("light")?"light":"dark");
- closeSidebar();
-};
+    models = config.models || [];
+    defaultModel = config.defaultModel || "";
 
-if(localStorage.getItem("sn-theme")==="light"){
- document.body.classList.add("light");
+    $("model").innerHTML = "";
+
+    models.forEach(model => {
+      const option = document.createElement("option");
+      option.value = model;
+      option.textContent = model;
+      $("model").appendChild(option);
+    });
+
+    $("model").value = defaultModel;
+  } catch (error) {
+    elements.status.textContent = "Could not load AI settings.";
+  }
 }
 
-$("searchBtn").onclick=()=>{
- webSearch=!webSearch;
- $("searchBtn").textContent=webSearch?"🌐 Search: On":"🌐 Search: Off";
-};
-
-$("newChat").onclick=()=>{
- stopGeneration();
- messages=[];
- lastQuestion="";
- $("messages").innerHTML="";
- $("welcome").style.display="block";
- $("prompt").value="";
- closeSidebar();
- $("prompt").focus();
-};
-
-function addMessage(role,content){
- $("welcome").style.display="none";
- const item=document.createElement("div");
- item.className="message";
- const avatar=document.createElement("div");
- avatar.className="avatar";
- avatar.textContent=role==="user"?"You":"AI";
- const body=document.createElement("div");
- body.className="content";
- item.append(avatar,body);
- $("messages").append(item);
- if(role==="assistant") renderMarkdown(body,content);
- else body.textContent=content;
- $("chat").scrollTop=$("chat").scrollHeight;
- return {body,item};
+function renderMarkdown(text) {
+  const html = marked.parse(text || "");
+  return DOMPurify.sanitize(html);
 }
 
-function renderMarkdown(element,text){
- const html=marked.parse(text);
- element.innerHTML=DOMPurify.sanitize(html);
- element.querySelectorAll("pre code").forEach(block=>{
-  if(window.hljs) hljs.highlightElement(block);
-  const copy=document.createElement("button");
-  copy.className="codecopy";
-  copy.textContent="Copy code";
-  copy.onclick=async()=>{
-   await navigator.clipboard.writeText(block.innerText);
-   copy.textContent="Copied!";
-   setTimeout(()=>copy.textContent="Copy code",1200);
-  };
-  block.parentElement.append(copy);
- });
+function addMessage(role, text) {
+  $("welcome")?.remove();
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "message";
+
+  const avatar = document.createElement("div");
+  avatar.className = "avatar";
+  avatar.textContent = role === "user" ? "U" : "⚡";
+
+  const content = document.createElement("div");
+  content.className = "content";
+  content.innerHTML = renderMarkdown(text);
+
+  content.querySelectorAll("pre code").forEach(block => {
+    hljs.highlightElement(block);
+  });
+
+  wrapper.appendChild(avatar);
+  wrapper.appendChild(content);
+  elements.messages.appendChild(wrapper);
+
+  $("chat").scrollTop = $("chat").scrollHeight;
+
+  return content;
 }
 
-function addTools(item,text){
- const tools=document.createElement("div");
- tools.className="message-tools";
-
- const copy=document.createElement("button");
- copy.className="toolbtn";
- copy.textContent="📋 Copy";
- copy.onclick=async()=>{
-  await navigator.clipboard.writeText(text);
-  copy.textContent="Copied!";
-  setTimeout(()=>copy.textContent="📋 Copy",1200);
- };
-
- const read=document.createElement("button");
- read.className="toolbtn";
- read.textContent="🔊 Read aloud";
- read.onclick=()=>speak(text);
-
- const regen=document.createElement("button");
- regen.className="toolbtn";
- regen.textContent="🔄 Regenerate";
- regen.onclick=()=>regenerate();
-
- tools.append(copy,read,regen);
- item.append(tools);
+function setGenerating(value) {
+  isGenerating = value;
+  elements.send.disabled = value;
+  elements.stop.style.display = value ? "inline-block" : "none";
+  elements.send.textContent = value ? "Working..." : "Send ↑";
 }
 
-function speak(text){
- if(!("speechSynthesis" in window)){
-  alert("Read aloud is not supported in this browser.");
-  return;
- }
- speechSynthesis.cancel();
- const utterance=new SpeechSynthesisUtterance(text);
- speechSynthesis.speak(utterance);
+async function sendMessage() {
+  const text = elements.prompt.value.trim();
+
+  if (!text || isGenerating) return;
+
+  elements.prompt.value = "";
+
+  messages.push({ role: "user", content: text });
+  addMessage("user", text);
+
+  const assistantContent = addMessage("assistant", "Thinking...");
+
+  controller = new AbortController();
+  setGenerating(true);
+  elements.status.textContent = "StackNetwork AI is responding...";
+
+  try {
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        messages,
+        instructions: currentInstructions,
+        persona: $("persona").value,
+        style: $("style").value,
+        answerLength: $("answerLength").value,
+        mode: $("mode").value,
+        model: $("model").value || defaultModel
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "Request failed.");
+    }
+
+    const reply = data.reply || "No response received.";
+
+    assistantContent.innerHTML = renderMarkdown(reply);
+
+    assistantContent.querySelectorAll("pre code").forEach(block => {
+      hljs.highlightElement(block);
+    });
+
+    messages.push({ role: "assistant", content: reply });
+    elements.status.textContent = "Response complete.";
+
+  } catch (error) {
+    if (error.name === "AbortError") {
+      assistantContent.textContent = "Generation stopped.";
+      elements.status.textContent = "Generation stopped.";
+    } else {
+      assistantContent.textContent = "Error: " + error.message;
+      elements.status.textContent = "Something went wrong.";
+    }
+  } finally {
+    setGenerating(false);
+    controller = null;
+  }
 }
 
-function stopGeneration(){
- if(activeController) activeController.abort();
- activeController=null;
- isGenerating=false;
- $("send").textContent="↑";
- $("send").title="Send";
- $("send").disabled=false;
- $("status").textContent="Generation stopped.";
+function stopGeneration() {
+  if (controller) controller.abort();
 }
 
-async function sendMessage(textOverride){
- if(isGenerating){
+function newChat() {
   stopGeneration();
-  return;
- }
-
- const prompt=$("prompt");
- const text=(textOverride ?? prompt.value).trim();
- if(!text)return;
-
- lastQuestion=text;
- prompt.value="";
- prompt.style.height="30px";
-
- addMessage("user",text);
- messages.push({role:"user",content:text});
-
- await requestAI();
+  messages = [];
+  elements.messages.innerHTML = `
+    <div class="welcome" id="welcome">
+      <h1>What can I help with?</h1>
+      <p>Welcome to StackNetwork AI</p>
+    </div>`;
+  elements.prompt.value = "";
+  elements.status.textContent = "New chat started.";
+  $("sidebar").classList.remove("open");
 }
 
-async function requestAI(){
- if(isGenerating)return;
- isGenerating=true;
- activeController=new AbortController();
-
- $("send").textContent="■";
- $("send").title="Stop generating";
- $("status").textContent="StackNetwork AI is responding...";
-
- const result=addMessage("assistant","Thinking...");
- const assistantItem=result.item;
-
- try{
-  const response=await fetch("/api/chat",{
-   method:"POST",
-   headers:{"Content-Type":"application/json"},
-   signal:activeController.signal,
-   body:JSON.stringify({
-    messages,
-    instructions:customInstructions,
-    answerLength:$("answerLength").value,
-    mode:$("mode").value,
-    persona:$("persona").value,
-    style:$("style").value,
-    model:$("model").value,
-    webSearch
-   })
-  });
-
-  const data=await response.json();
-  if(!response.ok)throw new Error(data.error||"Request failed.");
-
-  const answer=data.reply||"No response received.";
-  renderMarkdown(result.body,answer);
-  messages.push({role:"assistant",content:answer});
-  addTools(assistantItem,answer);
-
-  if(data.sources && data.sources.length){
-   const sources=document.createElement("div");
-   sources.className="message-tools";
-   const label=document.createElement("span");
-   label.textContent="Web sources:";
-   sources.append(label);
-   data.sources.forEach(source=>{
-    const link=document.createElement("a");
-    link.href=source.link;
-    link.target="_blank";
-    link.rel="noopener noreferrer";
-    link.textContent=source.title;
-    sources.append(link);
-   });
-   assistantItem.append(sources);
+function exportChat() {
+  if (!messages.length) {
+    alert("There is no chat to export.");
+    return;
   }
 
- }catch(error){
-  if(error.name==="AbortError"){
-   result.body.textContent="Generation stopped.";
-  }else{
-   result.body.textContent="Error: "+error.message;
-  }
- }finally{
-  isGenerating=false;
-  activeController=null;
-  $("send").textContent="↑";
-  $("send").title="Send";
-  $("send").disabled=false;
-  $("status").textContent="Enter to send · Shift + Enter for new line";
-  $("chat").scrollTop=$("chat").scrollHeight;
- }
+  const content = messages.map(message =>
+    `${message.role.toUpperCase()}:\n${message.content}`
+  ).join("\n\n");
+
+  const blob = new Blob([content], { type: "text/plain" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+
+  a.href = url;
+  a.download = "StackNetwork-AI-Chat.txt";
+  a.click();
+
+  URL.revokeObjectURL(url);
 }
 
-function regenerate(){
- if(isGenerating)return;
- const lastUserIndex=messages.map(m=>m.role).lastIndexOf("user");
- if(lastUserIndex<0)return;
- messages=messages.slice(0,lastUserIndex+1);
-
- const lastAssistant=$("messages").lastElementChild;
- if(lastAssistant && lastAssistant.querySelector(".avatar")?.textContent==="AI"){
-  lastAssistant.remove();
- }
- requestAI();
+function setTheme() {
+  document.body.classList.toggle("dark");
+  localStorage.setItem(
+    "stacknetwork-theme",
+    document.body.classList.contains("dark") ? "dark" : "light"
+  );
 }
 
-$("send").onclick=()=>{
- if(isGenerating)stopGeneration();
- else sendMessage();
-};
+function openModal(id) {
+  $(id).style.display = "flex";
+}
 
-$("prompt").addEventListener("keydown",e=>{
- if(e.key==="Enter"&&!e.shiftKey){
-  e.preventDefault();
-  sendMessage();
- }
+function closeModal(id) {
+  $(id).style.display = "none";
+}
+
+elements.send.addEventListener("click", sendMessage);
+elements.stop.addEventListener("click", stopGeneration);
+$("newChat").addEventListener("click", newChat);
+$("exportBtn").addEventListener("click", exportChat);
+$("themeBtn").addEventListener("click", setTheme);
+
+$("settingsBtn").addEventListener("click", () =>
+  openModal("settingsModal")
+);
+$("closeSettings").addEventListener("click", () =>
+  closeModal("settingsModal")
+);
+
+$("instructionsBtn").addEventListener("click", () => {
+  $("customInstructions").value = currentInstructions;
+  openModal("instructionsModal");
 });
 
-$("prompt").addEventListener("input",e=>{
- e.target.style.height="30px";
- e.target.style.height=Math.min(e.target.scrollHeight,150)+"px";
-});
+$("closeInstructions").addEventListener("click", () =>
+  closeModal("instructionsModal")
+);
 
-$("exportChat").onclick=()=>{
- closeSidebar();
- if(!messages.length){
-  alert("There is no conversation to export.");
-  return;
- }
- const content=messages.map(m=>
-  (m.role==="user"?"YOU":"STACKNETWORK AI")+"\n"+m.content
- ).join("\n\n--------------------\n\n");
- const blob=new Blob([content],{type:"text/plain"});
- const url=URL.createObjectURL(blob);
- const a=document.createElement("a");
- a.href=url;
- a.download="StackNetwork-AI-Chat.txt";
- a.click();
- URL.revokeObjectURL(url);
-};
-
-async function loadConfig(){
- try{
-  const response=await fetch("/api/config");
-  const config=await response.json();
-  availableModels=config.models||[];
-  $("model").innerHTML="";
-  availableModels.forEach(model=>{
-   const option=document.createElement("option");
-   option.value=model;
-   option.textContent=model;
-   $("model").append(option);
-  });
-  $("model").value=config.defaultModel||availableModels[0]||"";
-  if(!config.webSearchAvailable){
-   $("searchBtn").title="Add SERPAPI_KEY in Render Environment to enable web search";
-  }
- }catch(error){
-  $("status").textContent="Could not load model settings.";
- }
-}
-loadConfig();
-
-// Voice input using browser speech recognition
-$("voiceBtn").onclick=()=>{
- const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
- if(!SpeechRecognition){
-  alert("Voice input is not supported in this browser. Try Chrome.");
-  return;
- }
- if(recognition){
-  recognition.stop();
-  recognition=null;
-  $("voiceBtn").textContent="🎙";
-  return;
- }
- recognition=new SpeechRecognition();
- recognition.lang="en-IN";
- recognition.interimResults=false;
- recognition.onresult=e=>{
-  $("prompt").value += e.results[0][0].transcript;
-  $("prompt").dispatchEvent(new Event("input"));
- };
- recognition.onend=()=>{
-  recognition=null;
-  $("voiceBtn").textContent="🎙";
- };
- recognition.onerror=()=>{
-  recognition=null;
-  $("voiceBtn").textContent="🎙";
- };
- $("voiceBtn").textContent="⏹";
- recognition.start();
-};
-
-// Keyboard shortcuts:
-// Ctrl/Cmd + K = new chat
-// Ctrl/Cmd + / = focus message box
-// Escape = stop generation or close menus
-document.addEventListener("keydown",e=>{
- if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){
-  e.preventDefault();
-  $("newChat").click();
- }
- if((e.ctrlKey||e.metaKey)&&e.key==="/"){
-  e.preventDefault();
-  $("prompt").focus();
- }
- if(e.key==="Escape"){
-  if(isGenerating)stopGeneration();
-  closeSidebar();
-  closeModal("settingsModal");
+$("saveInstructions").addEventListener("click", () => {
+  currentInstructions = $("customInstructions").value.trim();
   closeModal("instructionsModal");
- }
+  elements.status.textContent = "Custom instructions saved.";
 });
+
+$("menuBtn").addEventListener("click", () => {
+  $("sidebar").classList.toggle("open");
+});
+
+$("fontSize").addEventListener("change", event => {
+  document.body.classList.remove("small-font", "large-font");
+
+  if (event.target.value === "small") {
+    document.body.classList.add("small-font");
+  }
+
+  if (event.target.value === "large") {
+    document.body.classList.add("large-font");
+  }
+});
+
+elements.prompt.addEventListener("keydown", event => {
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    sendMessage();
+  }
+});
+
+document.addEventListener("keydown", event => {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    newChat();
+  }
+
+  if ((event.ctrlKey || event.metaKey) && event.key === "/") {
+    event.preventDefault();
+    elements.prompt.focus();
+  }
+
+  if (event.key === "Escape") {
+    stopGeneration();
+    closeModal("settingsModal");
+    closeModal("instructionsModal");
+  }
+});
+
+if (localStorage.getItem("stacknetwork-theme") === "dark") {
+  document.body.classList.add("dark");
+}
+
+loadConfig();
 </script>
 </body>
 </html>
