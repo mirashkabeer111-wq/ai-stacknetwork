@@ -1,11 +1,14 @@
+
 {
   "name": "stacknetwork-ai",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "StackNetwork AI Chat",
-  "license": "MIT",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
     "express": "^5.1.0"
