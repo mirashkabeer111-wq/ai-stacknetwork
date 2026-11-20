@@ -4,18 +4,22 @@ const path = require("path");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
-// Developer information
 app.get("/api/config", (req, res) => {
   res.json({
+    name: "StackNetwork AI",
     developer: "Muhammad Ashmil"
   });
 });
 
-// AI Chat API
+app.get("/api/health", (req, res) => {
+  res.json({ status: "online", model: MODEL });
+});
+
 app.post("/api/chat", async (req, res) => {
   try {
     const {
@@ -27,20 +31,19 @@ app.post("/api/chat", async (req, res) => {
       style = "balanced"
     } = req.body || {};
 
-    // Validate messages
+    if (!process.env.GROQ_API_KEY) {
+      return res.status(500).json({
+        error: "GROQ_API_KEY is missing in Render Environment."
+      });
+    }
+
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({
         error: "Please enter a message."
       });
     }
 
-    if (!process.env.GROQ_API_KEY) {
-      return res.status(500).json({
-        error: "GROQ_API_KEY is missing from Render."
-      });
-    }
-
-    const chatMessages = messages.slice(-30).map(message => {
+    const validMessages = messages.slice(-30).map(message => {
       if (
         !message ||
         !["user", "assistant"].includes(message.role) ||
@@ -55,58 +58,57 @@ app.post("/api/chat", async (req, res) => {
       };
     });
 
-    // AI Personas
     const personas = {
       helpful: "You are a helpful and friendly AI assistant.",
-      teacher: "You are a patient teacher who explains clearly.",
-      coder: "You are an expert programming assistant.",
-      creative: "You are a creative assistant.",
+      teacher: "You are a patient teacher. Explain things clearly.",
+      coder: "You are an expert programming and coding assistant.",
+      creative: "You are a creative writing assistant.",
       professional: "You are a professional AI assistant.",
       gamer: "You are a gaming expert, especially in Minecraft."
     };
 
-    // Answer Length
     const lengths = {
-      short: "Give short and direct answers.",
+      short: "Keep answers short and direct.",
       medium: "Give balanced answers with useful details.",
-      long: "Give detailed answers with examples."
+      long: "Give detailed answers with examples when useful."
     };
 
-    // Response Style
     const styles = {
-      balanced: "Use a balanced natural writing style.",
+      balanced: "Use a natural balanced writing style.",
       friendly: "Use a friendly conversational tone.",
       professional: "Use a professional tone.",
-      simple: "Use simple language.",
-      detailed: "Explain topics in detail."
+      simple: "Use simple language that is easy to understand.",
+      detailed: "Explain topics thoroughly with useful details."
     };
 
-    // System Prompt
     const systemPrompt = `
 You are StackNetwork AI.
 
-Developer: Muhammad Ashmil.
+Your developer is Muhammad Ashmil.
 
 PERSONALITY:
-- Friendly, helpful and intelligent.
-- Answer naturally.
-- Understand the user's intent.
+- Be helpful, friendly, intelligent and accurate.
+- Understand the user's actual question.
 - Avoid unnecessary refusals.
+- Do not claim to have performed actions you cannot perform.
 
 SAFETY:
-- Allow harmless educational discussions.
-- Allow fictional crime stories and roleplay.
-- Allow ethical cybersecurity learning.
+- Allow harmless educational discussions, fictional stories,
+  historical discussions and cybersecurity learning.
 - Do not provide actionable instructions for real-world violence,
   theft, fraud, malware deployment or unauthorized cyberattacks.
 - If a request crosses these boundaries, briefly refuse that part.
 
-ANSWER SETTINGS:
-${lengths[answerLength] || lengths.medium}
-${styles[style] || styles.balanced}
+PERSONA:
 ${personas[persona] || personas.helpful}
 
-THINKING MODE:
+ANSWER LENGTH:
+${lengths[answerLength] || lengths.medium}
+
+RESPONSE STYLE:
+${styles[style] || styles.balanced}
+
+MODE:
 ${mode === "thinking"
   ? "Think carefully before answering. Do not reveal private reasoning."
   : "Answer quickly and directly."}
@@ -117,44 +119,52 @@ ${String(instructions).slice(0, 4000)}
 Always provide a visible final answer.
 `;
 
-    // Groq API request
-    const model = "openai/gpt-oss-120b";
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 90000);
 
-    const response = await fetch(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            {
-              role: "system",
-              content: systemPrompt
-            },
-            ...chatMessages
-          ],
-          max_completion_tokens: 4096,
-          reasoning_effort: "low",
-          include_reasoning: false,
-          stream: false
-        })
-      }
-    );
+    let groqResponse;
 
-    // Read Groq response
-    const data = await response.json();
-
-    // Handle API errors
-    if (!response.ok) {
-      console.error(
-        "GROQ API ERROR:",
-        JSON.stringify(data, null, 2)
+    try {
+      groqResponse = await fetch(
+        "https://api.groq.com/openai/v1/chat/completions",
+        {
+          method: "POST",
+          signal: controller.signal,
+          headers: {
+            Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: MODEL,
+            messages: [
+              { role: "system", content: systemPrompt },
+              ...validMessages
+            ],
+            max_completion_tokens: 8192,
+            reasoning_effort: mode === "thinking" ? "high" : "low",
+            include_reasoning: false,
+            stream: false
+          })
+        }
       );
+    } finally {
+      clearTimeout(timeout);
+    }
 
+    const raw = await groqResponse.text();
+
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      console.error("Invalid Groq JSON:", raw.slice(0, 1500));
+      return res.status(502).json({
+        error: "Groq returned an invalid response."
+      });
+    }
+
+    if (!groqResponse.ok) {
+      console.error("Groq API error:", data);
       return res.status(502).json({
         error: data.error?.message || "Groq API request failed."
       });
@@ -162,28 +172,22 @@ Always provide a visible final answer.
 
     const choice = data.choices?.[0];
     const message = choice?.message;
-
     let reply = message?.content;
 
-    // Handle text blocks
     if (Array.isArray(reply)) {
       reply = reply
-        .filter(item => item.type === "text")
-        .map(item => item.text || "")
+        .filter(part => part.type === "text")
+        .map(part => part.text || "")
         .join("\n");
     }
 
-    // Handle empty response
     if (typeof reply !== "string" || !reply.trim()) {
-      console.error(
-        "EMPTY GROQ RESPONSE:",
-        JSON.stringify({
-          model: data.model,
-          finish_reason: choice?.finish_reason,
-          message,
-          usage: data.usage
-        }, null, 2)
-      );
+      console.error("Empty Groq response:", {
+        model: data.model,
+        finish_reason: choice?.finish_reason,
+        message,
+        usage: data.usage
+      });
 
       return res.status(502).json({
         error:
@@ -193,26 +197,31 @@ Always provide a visible final answer.
       });
     }
 
-    // Successful response
     return res.json({
-      reply: reply.trim()
+      reply: reply.trim(),
+      model: data.model
     });
 
   } catch (error) {
-    console.error("SERVER ERROR:", error);
+    console.error("Chat server error:", error);
+
+    if (error.name === "AbortError") {
+      return res.status(504).json({
+        error: "The AI request timed out. Please try again."
+      });
+    }
 
     return res.status(500).json({
-      error: error.message || "Internal server error."
+      error: "Server error: " + error.message
     });
   }
 });
 
-// Start server
 app.listen(PORT, "0.0.0.0", () => {
   console.log("--------------------------------");
-  console.log("⚡ StackNetwork AI Started");
+  console.log("StackNetwork AI is running!");
   console.log("Developer: Muhammad Ashmil");
-  console.log("Model: openai/gpt-oss-120b");
-  console.log(`Port: ${PORT}`);
+  console.log("Model: " + MODEL);
+  console.log("Port: " + PORT);
   console.log("--------------------------------");
 });
