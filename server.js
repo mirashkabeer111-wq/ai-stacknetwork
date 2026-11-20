@@ -8,10 +8,14 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
+// Developer information
 app.get("/api/config", (req, res) => {
-  res.json({ developer: "Muhammad Ashmil" });
+  res.json({
+    developer: "Muhammad Ashmil"
+  });
 });
 
+// AI Chat API
 app.post("/api/chat", async (req, res) => {
   try {
     const {
@@ -23,8 +27,11 @@ app.post("/api/chat", async (req, res) => {
       style = "balanced"
     } = req.body || {};
 
-    if (!Array.isArray(messages) || !messages.length) {
-      return res.status(400).json({ error: "Please enter a message." });
+    // Validate messages
+    if (!Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({
+        error: "Please enter a message."
+      });
     }
 
     if (!process.env.GROQ_API_KEY) {
@@ -33,68 +40,85 @@ app.post("/api/chat", async (req, res) => {
       });
     }
 
-    const chatMessages = messages.slice(-30).map(m => {
+    const chatMessages = messages.slice(-30).map(message => {
       if (
-        !m ||
-        !["user", "assistant"].includes(m.role) ||
-        typeof m.content !== "string"
+        !message ||
+        !["user", "assistant"].includes(message.role) ||
+        typeof message.content !== "string"
       ) {
         throw new Error("Invalid message format.");
       }
 
       return {
-        role: m.role,
-        content: m.content.slice(0, 20000)
+        role: message.role,
+        content: message.content.slice(0, 20000)
       };
     });
 
+    // AI Personas
     const personas = {
       helpful: "You are a helpful and friendly AI assistant.",
-      teacher: "You are a patient teacher.",
+      teacher: "You are a patient teacher who explains clearly.",
       coder: "You are an expert programming assistant.",
       creative: "You are a creative assistant.",
-      professional: "You are a professional assistant.",
+      professional: "You are a professional AI assistant.",
       gamer: "You are a gaming expert, especially in Minecraft."
     };
 
+    // Answer Length
     const lengths = {
       short: "Give short and direct answers.",
       medium: "Give balanced answers with useful details.",
       long: "Give detailed answers with examples."
     };
 
+    // Response Style
     const styles = {
-      balanced: "Use a balanced writing style.",
+      balanced: "Use a balanced natural writing style.",
       friendly: "Use a friendly conversational tone.",
       professional: "Use a professional tone.",
       simple: "Use simple language.",
       detailed: "Explain topics in detail."
     };
 
+    // System Prompt
     const systemPrompt = `
 You are StackNetwork AI.
+
 Developer: Muhammad Ashmil.
 
-Be helpful, friendly and accurate.
-Allow harmless educational, fictional and cybersecurity discussions.
-Do not provide actionable instructions for real-world harm or crime.
-Do not refuse harmless questions unnecessarily.
+PERSONALITY:
+- Friendly, helpful and intelligent.
+- Answer naturally.
+- Understand the user's intent.
+- Avoid unnecessary refusals.
 
-${personas[persona] || personas.helpful}
+SAFETY:
+- Allow harmless educational discussions.
+- Allow fictional crime stories and roleplay.
+- Allow ethical cybersecurity learning.
+- Do not provide actionable instructions for real-world violence,
+  theft, fraud, malware deployment or unauthorized cyberattacks.
+- If a request crosses these boundaries, briefly refuse that part.
+
+ANSWER SETTINGS:
 ${lengths[answerLength] || lengths.medium}
 ${styles[style] || styles.balanced}
+${personas[persona] || personas.helpful}
 
+THINKING MODE:
 ${mode === "thinking"
   ? "Think carefully before answering. Do not reveal private reasoning."
   : "Answer quickly and directly."}
 
-Additional instructions:
+CUSTOM INSTRUCTIONS:
 ${String(instructions).slice(0, 4000)}
 
 Always provide a visible final answer.
 `;
 
-    const model = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+    // Groq API request
+    const model = "openai/gpt-oss-120b";
 
     const response = await fetch(
       "https://api.groq.com/openai/v1/chat/completions",
@@ -107,22 +131,31 @@ Always provide a visible final answer.
         body: JSON.stringify({
           model,
           messages: [
-            { role: "system", content: systemPrompt },
+            {
+              role: "system",
+              content: systemPrompt
+            },
             ...chatMessages
           ],
-          temperature: 0.7,
-          max_completion_tokens: 2048,
+          max_completion_tokens: 4096,
+          reasoning_effort: "low",
+          include_reasoning: false,
           stream: false
         })
       }
     );
 
+    // Read Groq response
     const data = await response.json();
 
+    // Handle API errors
     if (!response.ok) {
-      console.error("GROQ API ERROR:", JSON.stringify(data));
+      console.error(
+        "GROQ API ERROR:",
+        JSON.stringify(data, null, 2)
+      );
 
-      return res.status(response.status).json({
+      return res.status(502).json({
         error: data.error?.message || "Groq API request failed."
       });
     }
@@ -132,7 +165,7 @@ Always provide a visible final answer.
 
     let reply = message?.content;
 
-    // Handle text returned as content blocks
+    // Handle text blocks
     if (Array.isArray(reply)) {
       reply = reply
         .filter(item => item.type === "text")
@@ -140,20 +173,30 @@ Always provide a visible final answer.
         .join("\n");
     }
 
+    // Handle empty response
     if (typeof reply !== "string" || !reply.trim()) {
-      console.error("EMPTY AI RESPONSE:", JSON.stringify({
-        model: data.model,
-        finish_reason: choice?.finish_reason,
-        message,
-        usage: data.usage
-      }));
+      console.error(
+        "EMPTY GROQ RESPONSE:",
+        JSON.stringify({
+          model: data.model,
+          finish_reason: choice?.finish_reason,
+          message,
+          usage: data.usage
+        }, null, 2)
+      );
 
       return res.status(502).json({
-        error: `The model returned no visible text. Finish reason: ${choice?.finish_reason || "unknown"}. Check Render logs.`
+        error:
+          "Groq returned no visible text. Finish reason: " +
+          (choice?.finish_reason || "unknown") +
+          ". Check Render Logs."
       });
     }
 
-    return res.json({ reply: reply.trim() });
+    // Successful response
+    return res.json({
+      reply: reply.trim()
+    });
 
   } catch (error) {
     console.error("SERVER ERROR:", error);
@@ -164,6 +207,12 @@ Always provide a visible final answer.
   }
 });
 
+// Start server
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`StackNetwork AI running on port ${PORT}`);
+  console.log("--------------------------------");
+  console.log("⚡ StackNetwork AI Started");
+  console.log("Developer: Muhammad Ashmil");
+  console.log("Model: openai/gpt-oss-120b");
+  console.log(`Port: ${PORT}`);
+  console.log("--------------------------------");
 });
