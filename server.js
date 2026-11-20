@@ -9,9 +9,7 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/api/config", (req, res) => {
-  res.json({
-    developer: "Muhammad Ashmil"
-  });
+  res.json({ developer: "Muhammad Ashmil" });
 });
 
 app.post("/api/chat", async (req, res) => {
@@ -25,10 +23,8 @@ app.post("/api/chat", async (req, res) => {
       style = "balanced"
     } = req.body || {};
 
-    if (!Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({
-        error: "Please enter a message."
-      });
+    if (!Array.isArray(messages) || !messages.length) {
+      return res.status(400).json({ error: "Please enter a message." });
     }
 
     if (!process.env.GROQ_API_KEY) {
@@ -37,27 +33,27 @@ app.post("/api/chat", async (req, res) => {
       });
     }
 
-    const validMessages = messages.slice(-30).map(message => {
+    const chatMessages = messages.slice(-30).map(m => {
       if (
-        !message ||
-        !["user", "assistant"].includes(message.role) ||
-        typeof message.content !== "string"
+        !m ||
+        !["user", "assistant"].includes(m.role) ||
+        typeof m.content !== "string"
       ) {
         throw new Error("Invalid message format.");
       }
 
       return {
-        role: message.role,
-        content: message.content.slice(0, 20000)
+        role: m.role,
+        content: m.content.slice(0, 20000)
       };
     });
 
     const personas = {
       helpful: "You are a helpful and friendly AI assistant.",
-      teacher: "You are a patient teacher who explains clearly.",
+      teacher: "You are a patient teacher.",
       coder: "You are an expert programming assistant.",
-      creative: "You are a creative writing assistant.",
-      professional: "You are a professional AI assistant.",
+      creative: "You are a creative assistant.",
+      professional: "You are a professional assistant.",
       gamer: "You are a gaming expert, especially in Minecraft."
     };
 
@@ -68,49 +64,37 @@ app.post("/api/chat", async (req, res) => {
     };
 
     const styles = {
-      balanced: "Use a balanced natural writing style.",
+      balanced: "Use a balanced writing style.",
       friendly: "Use a friendly conversational tone.",
       professional: "Use a professional tone.",
-      simple: "Use simple language that is easy to understand.",
+      simple: "Use simple language.",
       detailed: "Explain topics in detail."
     };
 
     const systemPrompt = `
 You are StackNetwork AI.
-
 Developer: Muhammad Ashmil.
 
-PERSONALITY:
-- Friendly, helpful and intelligent.
-- Answer naturally.
-- Understand the user's intent.
-- Avoid unnecessary refusals.
-- Do not automatically refuse merely because a topic involves crime,
-  illegal activity, hacking, weapons, or other sensitive subjects.
+Be helpful, friendly and accurate.
+Allow harmless educational, fictional and cybersecurity discussions.
+Do not provide actionable instructions for real-world harm or crime.
+Do not refuse harmless questions unnecessarily.
 
-DISCUSSION RULES:
-- Allow educational and historical discussions of illegal topics.
-- Allow fictional crime stories and roleplay.
-- Allow cybersecurity education and authorized security testing.
-- Allow explanations of how scams and attacks work for awareness and prevention.
-- Do not provide actionable instructions that facilitate real-world
-  violence, theft, fraud, malware deployment, or unauthorized cyberattacks.
-- If a request crosses those boundaries, briefly refuse that part
-  and, when useful, provide safe educational context.
-
-ANSWER SETTINGS:
+${personas[persona] || personas.helpful}
 ${lengths[answerLength] || lengths.medium}
 ${styles[style] || styles.balanced}
-${personas[persona] || personas.helpful}
 
-THINKING MODE:
 ${mode === "thinking"
-  ? "Reason carefully before answering. Do not reveal private chain-of-thought."
+  ? "Think carefully before answering. Do not reveal private reasoning."
   : "Answer quickly and directly."}
 
-CUSTOM INSTRUCTIONS:
+Additional instructions:
 ${String(instructions).slice(0, 4000)}
+
+Always provide a visible final answer.
 `;
+
+    const model = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
 
     const response = await fetch(
       "https://api.groq.com/openai/v1/chat/completions",
@@ -121,13 +105,13 @@ ${String(instructions).slice(0, 4000)}
           "Content-Type": "application/json"
         },
         body: JSON.stringify({
-          model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+          model,
           messages: [
             { role: "system", content: systemPrompt },
-            ...validMessages
+            ...chatMessages
           ],
           temperature: 0.7,
-          max_tokens: 2048,
+          max_completion_tokens: 2048,
           stream: false
         })
       }
@@ -136,27 +120,43 @@ ${String(instructions).slice(0, 4000)}
     const data = await response.json();
 
     if (!response.ok) {
-      console.error("Groq API error:", data);
+      console.error("GROQ API ERROR:", JSON.stringify(data));
 
       return res.status(response.status).json({
-        error: data.error?.message || "Groq API error."
+        error: data.error?.message || "Groq API request failed."
       });
     }
 
-    const reply = data.choices?.[0]?.message?.content;
+    const choice = data.choices?.[0];
+    const message = choice?.message;
+
+    let reply = message?.content;
+
+    // Handle text returned as content blocks
+    if (Array.isArray(reply)) {
+      reply = reply
+        .filter(item => item.type === "text")
+        .map(item => item.text || "")
+        .join("\n");
+    }
 
     if (typeof reply !== "string" || !reply.trim()) {
-      console.error("Empty Groq response:", data);
+      console.error("EMPTY AI RESPONSE:", JSON.stringify({
+        model: data.model,
+        finish_reason: choice?.finish_reason,
+        message,
+        usage: data.usage
+      }));
 
       return res.status(502).json({
-        error: "The AI returned an empty response."
+        error: `The model returned no visible text. Finish reason: ${choice?.finish_reason || "unknown"}. Check Render logs.`
       });
     }
 
-    return res.json({ reply });
+    return res.json({ reply: reply.trim() });
 
   } catch (error) {
-    console.error("Server error:", error);
+    console.error("SERVER ERROR:", error);
 
     return res.status(500).json({
       error: error.message || "Internal server error."
