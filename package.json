@@ -1,6 +1,7 @@
+
 {
   "name": "stacknetwork-ai",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "StackNetwork AI Chat",
   "main": "server.js",
   "scripts": {
