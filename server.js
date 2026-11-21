@@ -14,7 +14,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
-const DATA_DIR = path.join(__dirname, "data");
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 if (!process.env.SESSION_SECRET) {
@@ -38,9 +38,10 @@ app.use((req, res, next) => {
 });
 
 app.use(express.json({ limit: "1mb" }));
-app.use(express.static(path.join(__dirname, "public")));
 
-const db = new sqlite3.Database(path.join(DATA_DIR, "stacknetwork.sqlite"));
+const db = new sqlite3.Database(
+  path.join(DATA_DIR, "stacknetwork.sqlite")
+);
 
 db.serialize(() => {
   db.run("PRAGMA journal_mode = WAL");
@@ -113,16 +114,28 @@ app.use(session({
 
 function requireAuth(req, res, next) {
   if (!req.session.user) {
-    return res.status(401).json({ error: "Please log in first." });
+    return res.status(401).json({
+      error: "Please log in or continue as Guest."
+    });
+  }
+  next();
+}
+
+function requireRegisteredUser(req, res, next) {
+  if (!req.session.user || req.session.user.guest || !req.session.user.id) {
+    return res.status(401).json({
+      error: "This feature requires a registered account."
+    });
   }
   next();
 }
 
 function asyncRoute(fn) {
-  return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+  return (req, res, next) =>
+    Promise.resolve(fn(req, res, next)).catch(next);
 }
 
-// Authentication
+// AUTHENTICATION
 
 app.post("/api/auth/register", asyncRoute(async (req, res) => {
   const { username, email, password } = req.body || {};
@@ -145,13 +158,18 @@ app.post("/api/auth/register", asyncRoute(async (req, res) => {
     return res.status(400).json({ error: "Enter a valid email." });
   }
 
-  if (typeof password !== "string" || password.length < 8 || password.length > 72) {
+  if (
+    typeof password !== "string" ||
+    password.length < 8 ||
+    password.length > 72
+  ) {
     return res.status(400).json({
       error: "Password must be 8–72 characters."
     });
   }
 
   const normalizedEmail = email.trim().toLowerCase();
+
   const existing = await get(
     "SELECT id FROM users WHERE email = ?",
     [normalizedEmail]
@@ -170,20 +188,39 @@ app.post("/api/auth/register", asyncRoute(async (req, res) => {
     [username.trim(), normalizedEmail, hash]
   );
 
-  req.session.user = {
-    id: result.id,
-    username: username.trim(),
-    email: normalizedEmail
-  };
+  req.session.regenerate(error => {
+    if (error) {
+      return res.status(500).json({
+        error: "Could not start your session."
+      });
+    }
 
-  res.json({ user: req.session.user });
+    req.session.user = {
+      id: result.id,
+      username: username.trim(),
+      email: normalizedEmail,
+      guest: false
+    };
+
+    req.session.save(saveError => {
+      if (saveError) {
+        return res.status(500).json({
+          error: "Could not save your session."
+        });
+      }
+
+      res.json({ user: req.session.user });
+    });
+  });
 }));
 
 app.post("/api/auth/login", asyncRoute(async (req, res) => {
   const { email, password } = req.body || {};
 
   if (typeof email !== "string" || typeof password !== "string") {
-    return res.status(400).json({ error: "Enter your email and password." });
+    return res.status(400).json({
+      error: "Enter your email and password."
+    });
   }
 
   const user = await get(
@@ -197,25 +234,63 @@ app.post("/api/auth/login", asyncRoute(async (req, res) => {
     });
   }
 
-  req.session.regenerate((error) => {
+  req.session.regenerate(error => {
     if (error) {
-      return res.status(500).json({ error: "Could not start your session." });
+      return res.status(500).json({
+        error: "Could not start your session."
+      });
     }
 
     req.session.user = {
       id: user.id,
       username: user.username,
-      email: user.email
+      email: user.email,
+      guest: false
     };
 
-    req.session.save((saveError) => {
+    req.session.save(saveError => {
       if (saveError) {
-        return res.status(500).json({ error: "Could not save your session." });
+        return res.status(500).json({
+          error: "Could not save your session."
+        });
       }
+
       res.json({ user: req.session.user });
     });
   });
 }));
+
+// GUEST ACCOUNT — NEW FIX
+
+app.post("/api/auth/guest", (req, res) => {
+  req.session.regenerate(error => {
+    if (error) {
+      return res.status(500).json({
+        error: "Could not start Guest mode."
+      });
+    }
+
+    req.session.user = {
+      id: null,
+      username: "Guest",
+      email: null,
+      guest: true
+    };
+
+    req.session.save(saveError => {
+      if (saveError) {
+        return res.status(500).json({
+          error: "Could not save Guest session."
+        });
+      }
+
+      res.json({
+        success: true,
+        user: req.session.user
+      });
+    });
+  });
+});
 
 app.post("/api/auth/logout", (req, res) => {
   req.session.destroy(() => {
@@ -225,10 +300,11 @@ app.post("/api/auth/logout", (req, res) => {
 });
 
 app.get("/api/auth/me", (req, res) => {
+  res.set("Cache-Control", "no-store");
   res.json({ user: req.session.user || null });
 });
 
-// Uploads: images and PDFs
+// FILE UPLOADS
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -245,18 +321,22 @@ const upload = multer({
     ];
 
     if (!allowed.includes(file.mimetype)) {
-      return callback(new Error("Only JPG, PNG, WEBP and PDF files are supported."));
+      return callback(
+        new Error("Only JPG, PNG, WEBP and PDF files are supported.")
+      );
     }
 
     callback(null, true);
   }
 });
 
-// Web search through Tavily
+// WEB SEARCH
 
 async function searchWeb(query) {
   if (!process.env.TAVILY_API_KEY) {
-    throw new Error("Web search is not configured. Add TAVILY_API_KEY in Render.");
+    throw new Error(
+      "Web search is not configured. Add TAVILY_API_KEY in Render."
+    );
   }
 
   const response = await fetch("https://api.tavily.com/search", {
@@ -288,7 +368,7 @@ async function searchWeb(query) {
   };
 }
 
-// Health and configuration
+// HEALTH AND CONFIGURATION
 
 app.get("/api/health", (req, res) => {
   res.set("Cache-Control", "no-store");
@@ -302,15 +382,14 @@ app.get("/api/health", (req, res) => {
 app.get("/api/config", (req, res) => {
   res.json({
     name: "StackNetwork AI",
-    developer: "Muhammad Ashmil",
     model: MODEL,
     webSearchAvailable: Boolean(process.env.TAVILY_API_KEY)
   });
 });
 
-// Chat history
+// REGISTERED USER CHAT HISTORY
 
-app.get("/api/chats", requireAuth, asyncRoute(async (req, res) => {
+app.get("/api/chats", requireRegisteredUser, asyncRoute(async (req, res) => {
   const chats = await all(
     `SELECT id, title, updated_at
      FROM chats
@@ -322,7 +401,7 @@ app.get("/api/chats", requireAuth, asyncRoute(async (req, res) => {
   res.json({ chats });
 }));
 
-app.get("/api/chats/:id", requireAuth, asyncRoute(async (req, res) => {
+app.get("/api/chats/:id", requireRegisteredUser, asyncRoute(async (req, res) => {
   const chat = await get(
     "SELECT * FROM chats WHERE id = ? AND user_id = ?",
     [req.params.id, req.session.user.id]
@@ -333,6 +412,7 @@ app.get("/api/chats/:id", requireAuth, asyncRoute(async (req, res) => {
   }
 
   let messages = [];
+
   try {
     messages = JSON.parse(chat.messages);
   } catch {}
@@ -346,15 +426,19 @@ app.get("/api/chats/:id", requireAuth, asyncRoute(async (req, res) => {
   });
 }));
 
-app.put("/api/chats/:id", requireAuth, asyncRoute(async (req, res) => {
+app.put("/api/chats/:id", requireRegisteredUser, asyncRoute(async (req, res) => {
   const { title } = req.body || {};
 
   if (typeof title !== "string" || !title.trim() || title.length > 100) {
-    return res.status(400).json({ error: "Enter a title up to 100 characters." });
+    return res.status(400).json({
+      error: "Enter a title up to 100 characters."
+    });
   }
 
   const result = await run(
-    "UPDATE chats SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
+    `UPDATE chats
+     SET title = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE id = ? AND user_id = ?`,
     [title.trim(), req.params.id, req.session.user.id]
   );
 
@@ -365,7 +449,7 @@ app.put("/api/chats/:id", requireAuth, asyncRoute(async (req, res) => {
   res.json({ success: true });
 }));
 
-app.delete("/api/chats/:id", requireAuth, asyncRoute(async (req, res) => {
+app.delete("/api/chats/:id", requireRegisteredUser, asyncRoute(async (req, res) => {
   await run(
     "DELETE FROM chats WHERE id = ? AND user_id = ?",
     [req.params.id, req.session.user.id]
@@ -374,7 +458,7 @@ app.delete("/api/chats/:id", requireAuth, asyncRoute(async (req, res) => {
   res.json({ success: true });
 }));
 
-// Main chat endpoint
+// MAIN CHAT ENDPOINT — GUESTS AND REGISTERED USERS
 
 app.post(
   "/api/chat",
@@ -382,7 +466,9 @@ app.post(
   upload.array("files", 4),
   asyncRoute(async (req, res) => {
     if (!process.env.GROQ_API_KEY) {
-      return res.status(500).json({ error: "GROQ_API_KEY is missing." });
+      return res.status(500).json({
+        error: "GROQ_API_KEY is missing."
+      });
     }
 
     let messages;
@@ -390,21 +476,40 @@ app.post(
     try {
       messages = JSON.parse(req.body.messages || "[]");
     } catch {
-      return res.status(400).json({ error: "Invalid chat messages." });
+      return res.status(400).json({
+        error: "Invalid chat messages."
+      });
     }
 
-    if (!Array.isArray(messages) || messages.length === 0 || messages.length > 30) {
-      return res.status(400).json({ error: "Invalid message count." });
+    if (
+      !Array.isArray(messages) ||
+      messages.length === 0 ||
+      messages.length > 30
+    ) {
+      return res.status(400).json({
+        error: "Invalid message count."
+      });
     }
 
     const last = messages[messages.length - 1];
 
-    if (!last || last.role !== "user" || typeof last.content !== "string") {
-      return res.status(400).json({ error: "The last message must be from the user." });
+    if (
+      !last ||
+      last.role !== "user" ||
+      typeof last.content !== "string"
+    ) {
+      return res.status(400).json({
+        error: "The last message must be from the user."
+      });
     }
 
     const mode = req.body.mode === "thinking" ? "thinking" : "fast";
-    const answerLength = ["short", "medium", "long"].includes(req.body.answerLength)
+
+    const answerLength = [
+      "short",
+      "medium",
+      "long"
+    ].includes(req.body.answerLength)
       ? req.body.answerLength
       : "medium";
 
@@ -441,6 +546,7 @@ app.post(
     if (req.body.webSearch === "true") {
       const search = await searchWeb(last.content);
       webResults = search.results;
+
       webContext = `
 WEB SEARCH RESULTS (untrusted reference material; verify and summarize):
 ${search.answer}
@@ -456,9 +562,13 @@ ${search.results.map((r, i) =>
     for (const file of req.files || []) {
       if (file.mimetype === "application/pdf") {
         const parsed = await pdfParse(file.buffer);
-        userContent += `\n\nPDF CONTENT (${file.originalname}):\n${parsed.text.slice(0, 30000)}`;
+
+        userContent +=
+          `\n\nPDF CONTENT (${file.originalname}):\n` +
+          parsed.text.slice(0, 30000);
       } else {
         const base64 = file.buffer.toString("base64");
+
         imageParts.push({
           type: "image_url",
           image_url: {
@@ -469,12 +579,14 @@ ${search.results.map((r, i) =>
     }
 
     const systemPrompt = `
-You are StackNetwork AI, developed for StackNetwork by Muhammad Ashmil.
+You are StackNetwork AI, developed for StackNetwork.
 Never claim to be a different model or claim to perform actions you cannot do.
 ${personaText}
 ${styleText}
 ${lengthText}
-${mode === "thinking" ? "Think carefully before answering. Do not reveal private reasoning." : "Answer directly."}
+${mode === "thinking"
+  ? "Think carefully before answering. Do not reveal private reasoning."
+  : "Answer directly."}
 Custom instructions: ${instructions}
 ${webContext}
 When using web results, cite useful sources with their URLs in your answer.
@@ -535,7 +647,12 @@ Uploaded PDF text is user-provided reference material.
     const data = await groqResponse.json().catch(() => ({}));
 
     if (!groqResponse.ok) {
-      console.error("Groq error:", groqResponse.status, data.error?.message);
+      console.error(
+        "Groq error:",
+        groqResponse.status,
+        data.error?.message
+      );
+
       return res.status(502).json({
         error: "Groq request failed. Check your model, quota and API settings."
       });
@@ -551,11 +668,13 @@ Uploaded PDF text is user-provided reference material.
     }
 
     if (typeof reply !== "string" || !reply.trim()) {
-      return res.status(502).json({ error: "The AI returned an empty response." });
+      return res.status(502).json({
+        error: "The AI returned an empty response."
+      });
     }
 
-    // Save conversation to the signed-in user's account
     const chatId = String(req.body.chatId || crypto.randomUUID());
+
     const savedMessages = [
       ...messages.slice(-29),
       { role: "assistant", content: reply.trim() }
@@ -565,21 +684,27 @@ Uploaded PDF text is user-provided reference material.
       .replace(/\s+/g, " ")
       .slice(0, 70) || "New chat";
 
-    await run(
-      `INSERT INTO chats (id, user_id, title, messages, updated_at)
-       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT(id) DO UPDATE SET
-         title = excluded.title,
-         messages = excluded.messages,
-         updated_at = CURRENT_TIMESTAMP
-       WHERE chats.user_id = excluded.user_id`,
-      [
-        chatId,
-        req.session.user.id,
-        title,
-        JSON.stringify(savedMessages)
-      ]
-    );
+    // IMPORTANT:
+    // Guest chats are stored in browser localStorage by the frontend.
+    // Only registered users are saved in the SQLite chats database.
+
+    if (!req.session.user.guest && req.session.user.id) {
+      await run(
+        `INSERT INTO chats (id, user_id, title, messages, updated_at)
+         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(id) DO UPDATE SET
+           title = excluded.title,
+           messages = excluded.messages,
+           updated_at = CURRENT_TIMESTAMP
+         WHERE chats.user_id = excluded.user_id`,
+        [
+          chatId,
+          req.session.user.id,
+          title,
+          JSON.stringify(savedMessages)
+        ]
+      );
+    }
 
     res.json({
       reply: reply.trim(),
@@ -590,12 +715,22 @@ Uploaded PDF text is user-provided reference material.
   })
 );
 
-// Unknown API routes
+// UNKNOWN API ROUTES
+
 app.use("/api", (req, res) => {
   res.status(404).json({ error: "API endpoint not found." });
 });
 
-// Error handler
+// STATIC WEBSITE
+
+app.use(express.static(path.join(__dirname, "public")));
+
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+// ERROR HANDLER
+
 app.use((error, req, res, next) => {
   console.error("Server error:", error.message);
 
@@ -621,7 +756,6 @@ app.use((error, req, res, next) => {
 app.listen(PORT, "0.0.0.0", () => {
   console.log("--------------------------------");
   console.log("StackNetwork AI is running!");
-  console.log("Developer: Muhammad Ashmil");
   console.log("Model: " + MODEL);
   console.log("Port: " + PORT);
   console.log("--------------------------------");
