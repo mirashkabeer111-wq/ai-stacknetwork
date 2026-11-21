@@ -18,6 +18,7 @@ const app = express();
 
 const PORT = process.env.PORT || 3000;
 const MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+const VISION_MODEL = process.env.VISION_MODEL || "qwen/qwen3.8-27b";
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -49,7 +50,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// ==========================================
 // DATABASE
+// ==========================================
 
 const db = new sqlite3.Database(
   path.join(DATA_DIR, "stacknetwork.sqlite")
@@ -116,19 +119,24 @@ function asyncRoute(fn) {
   };
 }
 
+// ==========================================
 // SESSION
+// ==========================================
 
 app.use(session({
   name: "stacknetwork.sid",
+
   store: new SQLiteStore({
     db: "sessions.sqlite",
     dir: DATA_DIR,
     concurrentDB: true
   }),
+
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   rolling: true,
+
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -137,7 +145,9 @@ app.use(session({
   }
 }));
 
+// ==========================================
 // RATE LIMITS
+// ==========================================
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -153,7 +163,9 @@ const chatLimiter = rateLimit({
   legacyHeaders: false
 });
 
+// ==========================================
 // AUTH MIDDLEWARE
+// ==========================================
 
 function requireAuth(req, res, next) {
   if (!req.session || !req.session.user) {
@@ -180,7 +192,9 @@ function requireRegisteredUser(req, res, next) {
   next();
 }
 
-// AUTHENTICATION
+// ==========================================
+// REGISTER
+// ==========================================
 
 app.post(
   "/api/auth/register",
@@ -268,6 +282,10 @@ app.post(
   })
 );
 
+// ==========================================
+// LOGIN
+// ==========================================
+
 app.post(
   "/api/auth/login",
   authLimiter,
@@ -324,7 +342,9 @@ app.post(
   })
 );
 
+// ==========================================
 // GUEST ACCOUNT
+// ==========================================
 
 app.post(
   "/api/auth/guest",
@@ -360,7 +380,9 @@ app.post(
   }
 );
 
+// ==========================================
 // CURRENT USER
+// ==========================================
 
 app.get("/api/auth/me", (req, res) => {
   res.set("Cache-Control", "no-store");
@@ -370,7 +392,9 @@ app.get("/api/auth/me", (req, res) => {
   });
 });
 
+// ==========================================
 // LOGOUT
+// ==========================================
 
 app.post("/api/auth/logout", (req, res) => {
   if (!req.session) {
@@ -394,14 +418,18 @@ app.post("/api/auth/logout", (req, res) => {
   });
 });
 
+// ==========================================
 // FILE UPLOADS
+// ==========================================
 
 const upload = multer({
   storage: multer.memoryStorage(),
+
   limits: {
     fileSize: 8 * 1024 * 1024,
     files: 4
   },
+
   fileFilter: (req, file, callback) => {
     const allowed = [
       "image/jpeg",
@@ -420,7 +448,9 @@ const upload = multer({
   }
 });
 
+// ==========================================
 // WEB SEARCH
+// ==========================================
 
 async function searchWeb(query) {
   if (!process.env.TAVILY_API_KEY) {
@@ -433,9 +463,11 @@ async function searchWeb(query) {
     "https://api.tavily.com/search",
     {
       method: "POST",
+
       headers: {
         "Content-Type": "application/json"
       },
+
       body: JSON.stringify({
         api_key: process.env.TAVILY_API_KEY,
         query,
@@ -443,6 +475,7 @@ async function searchWeb(query) {
         search_depth: "basic",
         include_answer: true
       }),
+
       signal: AbortSignal.timeout(20000)
     }
   );
@@ -455,6 +488,7 @@ async function searchWeb(query) {
 
   return {
     answer: data.answer || "",
+
     results: (data.results || []).map(item => ({
       title: item.title,
       url: item.url,
@@ -463,7 +497,9 @@ async function searchWeb(query) {
   };
 }
 
+// ==========================================
 // HEALTH
+// ==========================================
 
 app.get("/api/health", (req, res) => {
   res.set("Cache-Control", "no-store");
@@ -471,21 +507,27 @@ app.get("/api/health", (req, res) => {
   res.json({
     status: "online",
     name: "StackNetwork AI",
-    model: MODEL
+    model: MODEL,
+    visionModel: VISION_MODEL
   });
 });
 
+// ==========================================
 // CONFIGURATION
+// ==========================================
 
 app.get("/api/config", (req, res) => {
   res.json({
     name: "StackNetwork AI",
     model: MODEL,
+    visionModel: VISION_MODEL,
     webSearchAvailable: Boolean(process.env.TAVILY_API_KEY)
   });
 });
 
+// ==========================================
 // REGISTERED USER CHAT HISTORY
+// ==========================================
 
 app.get(
   "/api/chats",
@@ -587,19 +629,26 @@ app.delete(
   })
 );
 
-// MAIN AI CHAT — GUEST + REGISTERED
+// ==========================================
+// MAIN AI CHAT
+// GUEST + REGISTERED USERS
+// ==========================================
 
 app.post(
   "/api/chat",
   chatLimiter,
   requireAuth,
   upload.array("files", 4),
+
   asyncRoute(async (req, res) => {
+
     if (!process.env.GROQ_API_KEY) {
       return res.status(500).json({
         error: "GROQ_API_KEY is missing."
       });
     }
+
+    // Read messages
 
     let messages;
 
@@ -632,6 +681,8 @@ app.post(
         error: "The last message must be from the user."
       });
     }
+
+    // AI mode
 
     const mode =
       req.body.mode === "thinking" ? "thinking" : "fast";
@@ -674,6 +725,8 @@ app.post(
       long: "Give detailed answers and examples."
     }[answerLength];
 
+    // Web search
+
     let webContext = "";
     let webResults = [];
 
@@ -685,68 +738,170 @@ app.post(
       webContext = `
 WEB SEARCH RESULTS:
 ${search.answer}
+
 ${search.results.map((r, i) =>
   `${i + 1}. ${r.title}\n${r.url}\n${r.content}`
 ).join("\n\n")}
 `;
     }
 
+    // ======================================
+    // PROCESS IMAGE AND PDF ATTACHMENTS
+    // ======================================
+
     let userContent = last.content;
     const imageParts = [];
 
-    for (const file of req.files || []) {
-      if (file.mimetype === "application/pdf") {
+    const files = req.files || [];
+
+    const imageFiles = files.filter(file =>
+      file.mimetype.startsWith("image/")
+    );
+
+    const pdfFiles = files.filter(file =>
+      file.mimetype === "application/pdf"
+    );
+
+    // Groq currently allows up to 3 images per request.
+
+    if (imageFiles.length > 3) {
+      return res.status(400).json({
+        error: "You can upload a maximum of 3 images per message."
+      });
+    }
+
+    // Keep combined image payload within a reasonable size.
+
+    const totalImageBytes = imageFiles.reduce(
+      (total, file) => total + file.size,
+      0
+    );
+
+    if (totalImageBytes > 14 * 1024 * 1024) {
+      return res.status(400).json({
+        error: "Your images are too large together. Please reduce their size."
+      });
+    }
+
+    // Process PDFs.
+
+    for (const file of pdfFiles) {
+      try {
         const parsed = await pdfParse(file.buffer);
+
+        const extractedText = String(parsed.text || "")
+          .slice(0, 30000);
 
         userContent +=
           `\n\nPDF CONTENT (${file.originalname}):\n` +
-          parsed.text.slice(0, 30000);
-      } else {
-        const base64 = file.buffer.toString("base64");
+          extractedText;
 
-        imageParts.push({
-          type: "image_url",
-          image_url: {
-            url: `data:${file.mimetype};base64,${base64}`
-          }
+      } catch (error) {
+        console.error("PDF parsing error:", error.message);
+
+        return res.status(400).json({
+          error: `Could not read PDF: ${file.originalname}`
         });
       }
     }
 
+    // Convert images to base64 data URLs.
+
+    for (const file of imageFiles) {
+      const base64 = file.buffer.toString("base64");
+
+      imageParts.push({
+        type: "image_url",
+
+        image_url: {
+          url: `data:${file.mimetype};base64,${base64}`
+        }
+      });
+    }
+
+    // ======================================
+    // SYSTEM PROMPT
+    // ======================================
+
     const systemPrompt = `
 You are StackNetwork AI, developed for StackNetwork.
-Never claim to be a different model or claim to perform actions you cannot do.
+
+Never claim to be a different model.
+Never claim to perform actions you cannot do.
+
 ${personaText}
 ${styleText}
 ${lengthText}
+
 ${mode === "thinking"
   ? "Think carefully before answering. Do not reveal private reasoning."
   : "Answer directly."}
-Custom instructions: ${instructions}
+
+Custom instructions:
+${instructions}
+
 ${webContext}
-When using web results, cite useful sources with their URLs.
+
 Uploaded PDF text is user-provided reference material.
+
+When using web search results, provide useful source URLs.
+When analysing images, describe only what can reasonably be observed.
 `;
+
+    // Previous messages.
 
     const history = messages.slice(-30, -1).map(m => ({
       role: m.role === "assistant" ? "assistant" : "user",
       content: String(m.content).slice(0, 12000)
     }));
 
+    // Combine text and image content.
+
     const finalUserContent = imageParts.length
       ? [
-          { type: "text", text: userContent },
+          {
+            type: "text",
+            text: userContent
+          },
           ...imageParts
         ]
       : userContent;
 
     const groqMessages = [
-      { role: "system", content: systemPrompt },
+      {
+        role: "system",
+        content: systemPrompt
+      },
       ...history,
-      { role: "user", content: finalUserContent }
+      {
+        role: "user",
+        content: finalUserContent
+      }
     ];
 
+    // ======================================
+    // AUTOMATIC MODEL SELECTION
+    // ======================================
+
+    const requestModel = imageParts.length > 0
+      ? VISION_MODEL
+      : MODEL;
+
+    console.log(
+      "Request model:",
+      requestModel,
+      "| Images:",
+      imageParts.length,
+      "| PDFs:",
+      pdfFiles.length
+    );
+
+    // ======================================
+    // GROQ API REQUEST
+    // ======================================
+
     const controller = new AbortController();
+
     const timeout = setTimeout(
       () => controller.abort(),
       90000
@@ -756,13 +911,20 @@ Uploaded PDF text is user-provided reference material.
 
     try {
       const body = {
-        model: MODEL,
+        model: requestModel,
         messages: groqMessages,
         max_completion_tokens: 4096,
         stream: false
       };
 
-      if (MODEL.toLowerCase().includes("gpt-oss")) {
+      // Reasoning settings for supported models.
+
+      const modelLower = requestModel.toLowerCase();
+
+      if (
+        modelLower.includes("gpt-oss") ||
+        modelLower.includes("qwen3.8")
+      ) {
         body.reasoning_effort =
           mode === "thinking" ? "high" : "low";
       }
@@ -771,14 +933,17 @@ Uploaded PDF text is user-provided reference material.
         "https://api.groq.com/openai/v1/chat/completions",
         {
           method: "POST",
+
           headers: {
             Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
             "Content-Type": "application/json"
           },
+
           body: JSON.stringify(body),
           signal: controller.signal
         }
       );
+
     } finally {
       clearTimeout(timeout);
     }
@@ -793,9 +958,15 @@ Uploaded PDF text is user-provided reference material.
       );
 
       return res.status(502).json({
-        error: "Groq request failed. Check your model, quota and API settings."
+        error: data.error?.message
+          ? `Groq error: ${data.error.message}`
+          : "Groq request failed. Check your model, quota and API settings."
       });
     }
+
+    // ======================================
+    // EXTRACT AI RESPONSE
+    // ======================================
 
     let reply = data.choices?.[0]?.message?.content;
 
@@ -812,6 +983,12 @@ Uploaded PDF text is user-provided reference material.
       });
     }
 
+    reply = reply.trim();
+
+    // ======================================
+    // SAVE CHAT
+    // ======================================
+
     const chatId = String(
       req.body.chatId || crypto.randomUUID()
     );
@@ -820,7 +997,7 @@ Uploaded PDF text is user-provided reference material.
       ...messages.slice(-29),
       {
         role: "assistant",
-        content: reply.trim()
+        content: reply
       }
     ];
 
@@ -828,9 +1005,11 @@ Uploaded PDF text is user-provided reference material.
       .replace(/\s+/g, " ")
       .slice(0, 70) || "New chat";
 
-    // GUEST CHAT IS NOT SAVED TO REGISTERED USER DATABASE
+    // Guest chats are not saved in the registered
+    // user's database.
 
     if (
+      req.session.user &&
       !req.session.user.guest &&
       req.session.user.id
     ) {
@@ -838,11 +1017,14 @@ Uploaded PDF text is user-provided reference material.
         `INSERT INTO chats
           (id, user_id, title, messages, updated_at)
          VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+
          ON CONFLICT(id) DO UPDATE SET
            title = excluded.title,
            messages = excluded.messages,
            updated_at = CURRENT_TIMESTAMP
+
          WHERE chats.user_id = excluded.user_id`,
+
         [
           chatId,
           req.session.user.id,
@@ -852,17 +1034,24 @@ Uploaded PDF text is user-provided reference material.
       );
     }
 
+    // ======================================
+    // SEND RESPONSE
+    // ======================================
+
     res.json({
       success: true,
-      reply: reply.trim(),
-      model: data.model || MODEL,
+      reply,
+      model: data.model || requestModel,
       chatId,
       webResults
     });
+
   })
 );
 
+// ==========================================
 // UNKNOWN API ROUTES
+// ==========================================
 
 app.use("/api", (req, res) => {
   res.status(404).json({
@@ -870,7 +1059,9 @@ app.use("/api", (req, res) => {
   });
 });
 
+// ==========================================
 // STATIC WEBSITE
+// ==========================================
 
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -880,10 +1071,16 @@ app.get("/", (req, res) => {
   );
 });
 
+// ==========================================
 // ERROR HANDLER
+// ==========================================
 
 app.use((error, req, res, next) => {
   console.error("Server error:", error.message);
+
+  if (res.headersSent) {
+    return next(error);
+  }
 
   if (error instanceof multer.MulterError) {
     return res.status(400).json({
@@ -893,7 +1090,10 @@ app.use((error, req, res, next) => {
     });
   }
 
-  if (error.message && error.message.includes("Only JPG")) {
+  if (
+    error.message &&
+    error.message.includes("Only JPG")
+  ) {
     return res.status(400).json({
       error: error.message
     });
@@ -905,20 +1105,23 @@ app.use((error, req, res, next) => {
     });
   }
 
-  if (!res.headersSent) {
-    res.status(500).json({
-      error: "An internal server error occurred."
-    });
-  }
+  res.status(500).json({
+    error: "An internal server error occurred."
+  });
 });
 
+// ==========================================
 // START SERVER
+// ==========================================
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log("--------------------------------");
   console.log("StackNetwork AI is running!");
-  console.log("Model: " + MODEL);
+  console.log("Text Model: " + MODEL);
+  console.log("Vision Model: " + VISION_MODEL);
   console.log("Port: " + PORT);
   console.log("Guest Account: Enabled");
+  console.log("Image Upload: Enabled");
+  console.log("PDF Upload: Enabled");
   console.log("--------------------------------");
 });
