@@ -45,6 +45,94 @@ body{
 }
 button,textarea,select{font:inherit}
 button{cursor:pointer}
+
+/* STARTUP ANIMATION */
+#startupScreen{
+  position:fixed;
+  inset:0;
+  z-index:99999;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:17px;
+  background:#080b18;
+  transition:opacity .7s ease,visibility .7s ease;
+}
+#startupScreen.hide{
+  opacity:0;
+  visibility:hidden;
+  pointer-events:none;
+}
+.startup-logo{
+  width:125px;
+  height:125px;
+  object-fit:contain;
+  border-radius:28px;
+  animation:startupPulse 1.5s ease-in-out infinite;
+  filter:drop-shadow(0 0 25px #7865ff);
+}
+.startup-title{
+  color:white;
+  font-size:27px;
+  font-weight:850;
+  letter-spacing:1px;
+  animation:startupText .8s ease both;
+}
+.startup-subtitle{
+  color:#9299b8;
+  font-size:11px;
+  letter-spacing:3px;
+}
+.startup-ring{
+  width:43px;
+  height:43px;
+  border:3px solid #242849;
+  border-top-color:#8b7cff;
+  border-right-color:#45b8ff;
+  border-radius:50%;
+  animation:startupSpin .8s linear infinite;
+  margin-top:8px;
+}
+.startup-line{
+  width:150px;
+  height:3px;
+  border-radius:10px;
+  background:#242849;
+  overflow:hidden;
+}
+.startup-line::after{
+  content:"";
+  display:block;
+  width:45%;
+  height:100%;
+  background:linear-gradient(90deg,#8b7cff,#45b8ff);
+  animation:startupProgress 2s ease-in-out infinite;
+}
+@keyframes startupSpin{
+  to{transform:rotate(360deg)}
+}
+@keyframes startupPulse{
+  50%{
+    transform:scale(1.08);
+    filter:drop-shadow(0 0 40px #45b8ff);
+  }
+}
+@keyframes startupText{
+  from{opacity:0;transform:translateY(12px)}
+  to{opacity:1;transform:translateY(0)}
+}
+@keyframes startupProgress{
+  from{transform:translateX(-110%)}
+  to{transform:translateX(230%)}
+}
+@media(prefers-reduced-motion:reduce){
+  #startupScreen{transition:none}
+  .startup-logo,.startup-ring,.startup-line::after{
+    animation:none;
+  }
+}
+
 .app{height:100dvh;display:flex;position:relative;overflow:hidden}
 .glow{
   position:fixed;width:400px;height:400px;border-radius:50%;
@@ -68,6 +156,14 @@ body.light .glow{opacity:.055}
   display:grid;place-items:center;color:white;font-size:19px;
   background:linear-gradient(135deg,#745cff,#28a9ef);
   box-shadow:0 5px 25px #755cff55;
+  overflow:hidden;
+}
+.logo img,.welcome-logo img{
+  width:100%;
+  height:100%;
+  object-fit:contain;
+  padding:4px;
+  border-radius:inherit;
 }
 .new-chat{
   border:1px solid var(--border);background:var(--panel2);
@@ -129,6 +225,7 @@ body.light .glow{opacity:.055}
   font-size:34px;color:white;background:linear-gradient(135deg,#745cff,#28a9ef);
   box-shadow:0 10px 55px #745cff55;margin-bottom:23px;
   animation:pulse 3s ease-in-out infinite;
+  overflow:hidden;
 }
 @keyframes pulse{50%{box-shadow:0 10px 70px #745cff99;transform:translateY(-4px)}}
 .welcome h1{font-size:clamp(27px,5vw,42px);margin:0 0 12px;letter-spacing:-1.6px}
@@ -284,6 +381,16 @@ body.light .bubble pre{background:#25252b}
 </head>
 
 <body>
+
+<!-- STACKNETWORK AI STARTUP SCREEN -->
+<div id="startupScreen">
+  <img src="/logo.png" class="startup-logo" alt="StackNetwork AI Logo">
+  <div class="startup-title">StackNetwork AI</div>
+  <div class="startup-subtitle">YOUR AI ASSISTANT</div>
+  <div class="startup-ring"></div>
+  <div class="startup-line"></div>
+</div>
+
 <div class="glow one"></div>
 <div class="glow two"></div>
 <div class="app">
@@ -292,7 +399,9 @@ body.light .bubble pre{background:#25252b}
 
   <aside class="sidebar" id="sidebar">
     <div class="brand">
-      <div class="logo">⚡</div>
+      <div class="logo">
+        <img src="/logo.png" alt="StackNetwork AI Logo">
+      </div>
       <span>StackNetwork AI</span>
     </div>
 
@@ -354,7 +463,9 @@ body.light .bubble pre{background:#25252b}
     <section class="chat-area" id="chatArea">
       <div class="chat-inner">
         <div class="welcome" id="welcome">
-          <div class="welcome-logo">⚡</div>
+          <div class="welcome-logo">
+            <img src="/logo.png" alt="StackNetwork AI Logo">
+          </div>
           <h1>Welcome to <span class="gradient-text">StackNetwork AI</span></h1>
           <p>Your intelligent AI assistant.<br>What would you like to explore today?</p>
 
@@ -431,6 +542,21 @@ body.light .bubble pre{background:#25252b}
 
 <script>
 const $ = id => document.getElementById(id);
+
+/* STARTUP ANIMATION */
+window.addEventListener("load", () => {
+  const startup = $("startupScreen");
+
+  if (!startup) return;
+
+  setTimeout(() => {
+    startup.classList.add("hide");
+
+    setTimeout(() => {
+      startup.remove();
+    }, 750);
+  }, 2000);
+});
 
 const messages = [];
 let customInstructions = "";
