@@ -1,0 +1,175 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StackNetwork Admin</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#080b14;color:#f4f6ff;font-family:Arial,sans-serif}
+header{padding:22px 6%;border-bottom:1px solid #252c40;display:flex;justify-content:space-between;align-items:center}
+h1{font-size:21px;color:#a5b4fc}
+main{max-width:1100px;margin:35px auto;padding:0 18px}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:15px}
+.card{background:#111827;border:1px solid #27334d;border-radius:14px;padding:22px}
+.number{font-size:32px;font-weight:bold;margin-top:12px;color:#a5b4fc}
+input{width:100%;padding:13px;background:#111827;border:1px solid #334155;border-radius:9px;color:white;margin:22px 0}
+table{width:100%;border-collapse:collapse;min-width:550px}
+th,td{text-align:left;padding:14px;border-bottom:1px solid #293348}
+th{color:#a5b4fc}
+button{background:#465cf5;color:white;border:0;padding:9px 13px;border-radius:7px;cursor:pointer}
+button:hover{opacity:.8}
+.panel{margin-top:25px;overflow-x:auto}
+#details{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}
+.muted{color:#9ca3af}
+@media(max-width:600px){.stats{grid-template-columns:1fr}header{padding:18px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>StackNetwork Admin</h1>
+  <span class="muted">Owner Dashboard</span>
+</header>
+
+<main>
+  <h2>Dashboard</h2>
+  <div class="stats">
+    <div class="card">
+      <div class="muted">Registered Users</div>
+      <div class="number" id="totalUsers">-</div>
+    </div>
+    <div class="card">
+      <div class="muted">Saved Conversations</div>
+      <div class="number" id="totalChats">-</div>
+    </div>
+  </div>
+
+  <input id="search" placeholder="Search username or email..." oninput="filterUsers()">
+
+  <section class="card panel">
+    <h2>Registered Users</h2>
+    <table>
+      <thead>
+        <tr><th>Username</th><th>Email</th><th>Joined</th><th>Action</th></tr>
+      </thead>
+      <tbody id="users"></tbody>
+    </table>
+  </section>
+
+  <section class="card panel">
+    <h2 id="chatTitle">User Conversations</h2>
+    <div id="chats" class="muted">Select a user to view conversations.</div>
+  </section>
+
+  <section class="card panel">
+    <h2 id="detailTitle">Conversation Details</h2>
+    <div id="details" class="muted">Select a conversation.</div>
+  </section>
+</main>
+
+<script>
+let allUsers = [];
+
+async function api(url) {
+  const response = await fetch(url, {credentials:"same-origin"});
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "Request failed");
+  return data;
+}
+
+async function loadDashboard() {
+  try {
+    const stats = await api("/api/admin/stats");
+    document.getElementById("totalUsers").textContent = stats.totalUsers;
+    document.getElementById("totalChats").textContent = stats.totalChats;
+
+    const data = await api("/api/admin/users");
+    allUsers = data.users;
+    renderUsers(allUsers);
+  } catch(error) {
+    document.querySelector("main").innerHTML =
+      "<h2>Access denied or dashboard unavailable</h2><p>" +
+      escapeHTML(error.message) +
+      '</p><p><a href="/">Return to StackNetwork AI</a></p>';
+  }
+}
+
+function escapeHTML(value) {
+  return String(value ?? "").replace(/[&<>"']/g, c => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  }[c]));
+}
+
+function renderUsers(users) {
+  document.getElementById("users").innerHTML = users.map(user => `
+    <tr>
+      <td>${escapeHTML(user.username)}</td>
+      <td>${escapeHTML(user.email)}</td>
+      <td>${escapeHTML(user.created_at)}</td>
+      <td><button data-user="${user.id}">View</button></td>
+    </tr>
+  `).join("") || '<tr><td colspan="4">No users found.</td></tr>';
+}
+
+function filterUsers() {
+  const query = document.getElementById("search").value.toLowerCase();
+  renderUsers(allUsers.filter(user =>
+    user.username.toLowerCase().includes(query) ||
+    user.email.toLowerCase().includes(query)
+  ));
+}
+
+document.getElementById("users").addEventListener("click", event => {
+  const button = event.target.closest("button[data-user]");
+  if (button) loadChats(button.dataset.user);
+});
+
+async function loadChats(userId) {
+  try {
+    document.getElementById("chatTitle").textContent = "Loading conversations...";
+    const data = await api("/api/admin/users/" + encodeURIComponent(userId) + "/chats");
+
+    document.getElementById("chatTitle").textContent = "User Conversations";
+    document.getElementById("chats").innerHTML = data.chats.map(chat => `
+      <div style="padding:12px 0;border-bottom:1px solid #293348">
+        <strong>${escapeHTML(chat.title)}</strong>
+        <p class="muted">${escapeHTML(chat.updated_at)}</p>
+        <button data-chat="${encodeURIComponent(chat.id)}">Read Conversation</button>
+      </div>
+    `).join("") || "No saved conversations.";
+  } catch(error) {
+    document.getElementById("chats").textContent = error.message;
+  }
+}
+
+document.getElementById("chats").addEventListener("click", event => {
+  const button = event.target.closest("button[data-chat]");
+  if (button) loadConversation(decodeURIComponent(button.dataset.chat));
+});
+
+async function loadConversation(chatId) {
+  try {
+    const data = await api("/api/admin/chats/" + encodeURIComponent(chatId));
+    const chat = data.chat;
+
+    document.getElementById("detailTitle").textContent =
+      "Conversation: " + chat.title;
+
+    document.getElementById("details").textContent =
+      "User: " + chat.username +
+      "\nEmail: " + chat.email +
+      "\n\n" +
+      chat.messages.map(message =>
+        (message.role || "unknown").toUpperCase() +
+        ":\n" + (message.content || "")
+      ).join("\n\n--------------------\n\n");
+  } catch(error) {
+    document.getElementById("details").textContent = error.message;
+  }
+}
+
+loadDashboard();
+</script>
+</body>
+</html>
