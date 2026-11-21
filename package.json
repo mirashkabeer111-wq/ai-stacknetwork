@@ -1,7 +1,7 @@
 
 {
   "name": "stacknetwork-ai",
-  "version": "4.0.0",
+  "version": "4.0.1",
   "description": "StackNetwork AI - Complete AI Chat Platform",
   "main": "server.js",
   "scripts": {
@@ -13,8 +13,11 @@
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "connect-sqlite3": "^0.9.15",
+    "dotenv": "^16.4.7",
     "express": "^5.1.0",
+    "express-rate-limit": "^7.5.0",
     "express-session": "^1.18.2",
+    "helmet": "^8.1.0",
     "multer": "^2.0.2",
     "pdf-parse": "1.1.1",
     "sqlite3": "^5.1.7"
