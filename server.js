@@ -9,7 +9,7 @@ const MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
 app.set("trust proxy", 1);
 
-/* BASIC SECURITY HEADERS */
+// Security headers
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "SAMEORIGIN");
@@ -18,18 +18,17 @@ app.use((req, res, next) => {
   next();
 });
 
-/* REQUEST BODY */
-app.use(express.json({
-  limit: "1mb"
+// Request body
+app.use(express.json({ limit: "1mb" }));
+
+// Static website and logo
+app.use(express.static(path.join(__dirname, "public"), {
+  maxAge: "1h"
 }));
 
-/* STATIC WEBSITE */
-app.use(express.static(path.join(__dirname, "public")));
-
-/* HEALTH CHECK */
+// Health check
 app.get("/api/health", (req, res) => {
   res.set("Cache-Control", "no-store");
-
   res.json({
     status: "online",
     name: "StackNetwork AI",
@@ -37,17 +36,17 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-/* CONFIG */
+// Website config
 app.get("/api/config", (req, res) => {
   res.json({
     name: "StackNetwork AI",
-    developer: "Muhammad Ashmil"
+    developer: "Muhammad Ashmil",
+    logo: "/logo.png"
   });
 });
 
-/* SIMPLE IN-MEMORY RATE LIMITER */
+// Rate limiter
 const rateLimits = new Map();
-
 const RATE_LIMIT = 20;
 const RATE_WINDOW = 60 * 1000;
 
@@ -58,10 +57,7 @@ function chatRateLimit(req, res, next) {
   let record = rateLimits.get(ip);
 
   if (!record || now - record.start > RATE_WINDOW) {
-    record = {
-      start: now,
-      count: 0
-    };
+    record = { start: now, count: 0 };
   }
 
   record.count++;
@@ -74,8 +70,9 @@ function chatRateLimit(req, res, next) {
   );
 
   if (record.count > RATE_LIMIT) {
-    const retryAfter = Math.ceil(
-      (record.start + RATE_WINDOW - now) / 1000
+    const retryAfter = Math.max(
+      1,
+      Math.ceil((record.start + RATE_WINDOW - now) / 1000)
     );
 
     res.setHeader("Retry-After", retryAfter);
@@ -88,7 +85,7 @@ function chatRateLimit(req, res, next) {
   next();
 }
 
-/* CLEAN OLD RATE LIMIT RECORDS */
+// Clean old rate-limit records
 setInterval(() => {
   const now = Date.now();
 
@@ -99,10 +96,11 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000).unref();
 
-/* CHAT API */
+// Chat API
 app.post("/api/chat", chatRateLimit, async (req, res) => {
   let timeout;
   let controller;
+  let onClientClose;
   let clientDisconnected = false;
   let timedOut = false;
 
@@ -116,14 +114,14 @@ app.post("/api/chat", chatRateLimit, async (req, res) => {
       style = "balanced"
     } = req.body || {};
 
-    /* API KEY CHECK */
+    // API key
     if (!process.env.GROQ_API_KEY) {
       return res.status(500).json({
         error: "GROQ_API_KEY is missing in Render Environment."
       });
     }
 
-    /* MESSAGE VALIDATION */
+    // Message validation
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({
         error: "Please enter a message."
@@ -162,14 +160,13 @@ app.post("/api/chat", chatRateLimit, async (req, res) => {
       });
     }
 
-    /* LAST MESSAGE MUST BE FROM USER */
     if (validMessages[validMessages.length - 1].role !== "user") {
       return res.status(400).json({
         error: "The latest message must be from the user."
       });
     }
 
-    /* SETTING VALIDATION */
+    // Allowed settings
     const allowedModes = ["fast", "thinking"];
     const allowedLengths = ["short", "medium", "long"];
 
@@ -208,7 +205,7 @@ app.post("/api/chat", chatRateLimit, async (req, res) => {
         ? instructions.slice(0, 4000)
         : "";
 
-    /* AI PERSONALITIES */
+    // Personas
     const personas = {
       helpful: "You are a helpful and friendly AI assistant.",
       teacher: "You are a patient teacher. Explain things clearly.",
@@ -218,14 +215,14 @@ app.post("/api/chat", chatRateLimit, async (req, res) => {
       gamer: "You are a gaming expert, especially in Minecraft."
     };
 
-    /* ANSWER LENGTH */
+    // Answer lengths
     const lengths = {
       short: "Keep answers short and direct.",
       medium: "Give balanced answers with useful details.",
       long: "Give detailed answers with examples when useful."
     };
 
-    /* RESPONSE STYLE */
+    // Response styles
     const styles = {
       balanced: "Use a natural balanced writing style.",
       friendly: "Use a friendly conversational tone.",
@@ -234,7 +231,7 @@ app.post("/api/chat", chatRateLimit, async (req, res) => {
       detailed: "Explain topics thoroughly with useful details."
     };
 
-    /* SYSTEM PROMPT */
+    // System prompt
     const systemPrompt = `
 IDENTITY:
 - Your official name is StackNetwork AI.
@@ -282,10 +279,10 @@ ${safeInstructions}
 Always provide a visible final answer.
 `;
 
-    /* CANCEL GROQ IF CLIENT DISCONNECTS */
+    // Cancel request if client disconnects
     controller = new AbortController();
 
-    const onClientClose = () => {
+    onClientClose = () => {
       if (!res.writableEnded) {
         clientDisconnected = true;
         controller.abort();
@@ -299,7 +296,7 @@ Always provide a visible final answer.
       controller.abort();
     }, 90000);
 
-    /* GROQ REQUEST */
+    // Groq request
     const requestBody = {
       model: MODEL,
       messages: [
@@ -313,10 +310,6 @@ Always provide a visible final answer.
       stream: false
     };
 
-    /*
-      GPT-OSS supports reasoning_effort.
-      Other models receive the thinking instruction in the system prompt.
-    */
     if (MODEL.toLowerCase().includes("gpt-oss")) {
       requestBody.reasoning_effort =
         safeMode === "thinking" ? "high" : "low";
@@ -349,7 +342,7 @@ Always provide a visible final answer.
       });
     }
 
-    /* GROQ ERROR */
+    // Provider errors
     if (!groqResponse.ok) {
       console.error("Groq API error:", {
         status: groqResponse.status,
@@ -357,11 +350,11 @@ Always provide a visible final answer.
       });
 
       return res.status(502).json({
-        error: data.error?.message || "Groq API request failed."
+        error: "Groq API request failed. Check your model and API configuration."
       });
     }
 
-    /* GET AI RESPONSE */
+    // Read response
     const choice = data.choices?.[0];
     const message = choice?.message;
 
@@ -377,19 +370,14 @@ Always provide a visible final answer.
     if (typeof reply !== "string" || !reply.trim()) {
       console.error("Groq returned an empty response:", {
         model: data.model,
-        finish_reason: choice?.finish_reason,
-        usage: data.usage
+        finish_reason: choice?.finish_reason
       });
 
       return res.status(502).json({
-        error:
-          "Groq returned no visible text. Finish reason: " +
-          (choice?.finish_reason || "unknown") +
-          ". Check Render Logs."
+        error: "Groq returned no visible text. Check Render Logs."
       });
     }
 
-    /* SUCCESS */
     return res.json({
       reply: reply.trim(),
       model: data.model
@@ -423,20 +411,21 @@ Always provide a visible final answer.
 
   } finally {
     if (timeout) clearTimeout(timeout);
-    if (controller) {
-      res.removeAllListeners("close");
+
+    if (onClientClose) {
+      res.removeListener("close", onClientClose);
     }
   }
 });
 
-/* UNKNOWN API ROUTES */
+// Unknown API routes
 app.use("/api", (req, res) => {
   res.status(404).json({
     error: "API endpoint not found."
   });
 });
 
-/* SERVER */
+// Server
 app.listen(PORT, "0.0.0.0", () => {
   console.log("--------------------------------");
   console.log("StackNetwork AI is running!");
