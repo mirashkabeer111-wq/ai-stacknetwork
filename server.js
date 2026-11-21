@@ -1,4 +1,6 @@
 
+require("dotenv").config();
+
 const express = require("express");
 const path = require("path");
 const fs = require("fs");
@@ -9,12 +11,15 @@ const sqlite3 = require("sqlite3").verbose();
 const bcrypt = require("bcryptjs");
 const multer = require("multer");
 const pdfParse = require("pdf-parse");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 
 const app = express();
+
 const PORT = process.env.PORT || 3000;
 const MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
-
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
+
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
 if (!process.env.SESSION_SECRET) {
@@ -23,11 +28,18 @@ if (!process.env.SESSION_SECRET) {
 }
 
 if (!process.env.GROQ_API_KEY) {
-  console.warn("GROQ_API_KEY is not configured.");
+  console.warn("WARNING: GROQ_API_KEY is not configured.");
 }
 
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
+
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false
+}));
+
+app.use(express.json({ limit: "1mb" }));
 
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
@@ -37,7 +49,7 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json({ limit: "1mb" }));
+// DATABASE
 
 const db = new sqlite3.Database(
   path.join(DATA_DIR, "stacknetwork.sqlite")
@@ -72,7 +84,10 @@ function run(sql, params = []) {
   return new Promise((resolve, reject) => {
     db.run(sql, params, function (error) {
       if (error) reject(error);
-      else resolve({ id: this.lastID, changes: this.changes });
+      else resolve({
+        id: this.lastID,
+        changes: this.changes
+      });
     });
   });
 }
@@ -95,7 +110,16 @@ function all(sql, params = []) {
   });
 }
 
+function asyncRoute(fn) {
+  return (req, res, next) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+}
+
+// SESSION
+
 app.use(session({
+  name: "stacknetwork.sid",
   store: new SQLiteStore({
     db: "sessions.sqlite",
     dir: DATA_DIR,
@@ -104,6 +128,7 @@ app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
+  rolling: true,
   cookie: {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -112,196 +137,261 @@ app.use(session({
   }
 }));
 
+// RATE LIMITS
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 30,
+  standardHeaders: "draft-8",
+  legacyHeaders: false
+});
+
+const chatLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 15,
+  standardHeaders: "draft-8",
+  legacyHeaders: false
+});
+
+// AUTH MIDDLEWARE
+
 function requireAuth(req, res, next) {
-  if (!req.session.user) {
+  if (!req.session || !req.session.user) {
     return res.status(401).json({
       error: "Please log in or continue as Guest."
     });
   }
+
   next();
 }
 
 function requireRegisteredUser(req, res, next) {
-  if (!req.session.user || req.session.user.guest || !req.session.user.id) {
+  if (
+    !req.session ||
+    !req.session.user ||
+    req.session.user.guest ||
+    !req.session.user.id
+  ) {
     return res.status(401).json({
       error: "This feature requires a registered account."
     });
   }
-  next();
-}
 
-function asyncRoute(fn) {
-  return (req, res, next) =>
-    Promise.resolve(fn(req, res, next)).catch(next);
+  next();
 }
 
 // AUTHENTICATION
 
-app.post("/api/auth/register", asyncRoute(async (req, res) => {
-  const { username, email, password } = req.body || {};
+app.post(
+  "/api/auth/register",
+  authLimiter,
+  asyncRoute(async (req, res) => {
+    const { username, email, password } = req.body || {};
 
-  if (
-    typeof username !== "string" ||
-    username.trim().length < 3 ||
-    username.trim().length > 24
-  ) {
-    return res.status(400).json({
-      error: "Username must be 3–24 characters."
-    });
-  }
-
-  if (
-    typeof email !== "string" ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
-    email.length > 254
-  ) {
-    return res.status(400).json({ error: "Enter a valid email." });
-  }
-
-  if (
-    typeof password !== "string" ||
-    password.length < 8 ||
-    password.length > 72
-  ) {
-    return res.status(400).json({
-      error: "Password must be 8–72 characters."
-    });
-  }
-
-  const normalizedEmail = email.trim().toLowerCase();
-
-  const existing = await get(
-    "SELECT id FROM users WHERE email = ?",
-    [normalizedEmail]
-  );
-
-  if (existing) {
-    return res.status(409).json({
-      error: "An account with this email already exists."
-    });
-  }
-
-  const hash = await bcrypt.hash(password, 12);
-
-  const result = await run(
-    "INSERT INTO users (username, email, password) VALUES (?, ?, ?)",
-    [username.trim(), normalizedEmail, hash]
-  );
-
-  req.session.regenerate(error => {
-    if (error) {
-      return res.status(500).json({
-        error: "Could not start your session."
+    if (
+      typeof username !== "string" ||
+      username.trim().length < 3 ||
+      username.trim().length > 24
+    ) {
+      return res.status(400).json({
+        error: "Username must be 3–24 characters."
       });
     }
 
-    req.session.user = {
-      id: result.id,
-      username: username.trim(),
-      email: normalizedEmail,
-      guest: false
-    };
-
-    req.session.save(saveError => {
-      if (saveError) {
-        return res.status(500).json({
-          error: "Could not save your session."
-        });
-      }
-
-      res.json({ user: req.session.user });
-    });
-  });
-}));
-
-app.post("/api/auth/login", asyncRoute(async (req, res) => {
-  const { email, password } = req.body || {};
-
-  if (typeof email !== "string" || typeof password !== "string") {
-    return res.status(400).json({
-      error: "Enter your email and password."
-    });
-  }
-
-  const user = await get(
-    "SELECT * FROM users WHERE email = ?",
-    [email.trim().toLowerCase()]
-  );
-
-  if (!user || !(await bcrypt.compare(password, user.password))) {
-    return res.status(401).json({
-      error: "Incorrect email or password."
-    });
-  }
-
-  req.session.regenerate(error => {
-    if (error) {
-      return res.status(500).json({
-        error: "Could not start your session."
+    if (
+      typeof email !== "string" ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+      email.length > 254
+    ) {
+      return res.status(400).json({
+        error: "Enter a valid email."
       });
     }
 
-    req.session.user = {
-      id: user.id,
-      username: user.username,
-      email: user.email,
-      guest: false
-    };
-
-    req.session.save(saveError => {
-      if (saveError) {
-        return res.status(500).json({
-          error: "Could not save your session."
-        });
-      }
-
-      res.json({ user: req.session.user });
-    });
-  });
-}));
-
-// GUEST ACCOUNT — NEW FIX
-
-app.post("/api/auth/guest", (req, res) => {
-  req.session.regenerate(error => {
-    if (error) {
-      return res.status(500).json({
-        error: "Could not start Guest mode."
+    if (
+      typeof password !== "string" ||
+      password.length < 8 ||
+      password.length > 72
+    ) {
+      return res.status(400).json({
+        error: "Password must be 8–72 characters."
       });
     }
 
-    req.session.user = {
-      id: null,
-      username: "Guest",
-      email: null,
-      guest: true
-    };
+    const normalizedEmail = email.trim().toLowerCase();
 
-    req.session.save(saveError => {
-      if (saveError) {
+    const existing = await get(
+      "SELECT id FROM users WHERE email = ?",
+      [normalizedEmail]
+    );
+
+    if (existing) {
+      return res.status(409).json({
+        error: "An account with this email already exists."
+      });
+    }
+
+    const hash = await bcrypt.hash(password, 12);
+
+    const result = await run(
+      "INSERT INTO users (username, email, password) VALUES (?, ?, ?)",
+      [username.trim(), normalizedEmail, hash]
+    );
+
+    req.session.regenerate(error => {
+      if (error) {
         return res.status(500).json({
-          error: "Could not save Guest session."
+          error: "Could not start your session."
         });
       }
 
-      res.json({
-        success: true,
-        user: req.session.user
+      req.session.user = {
+        id: result.id,
+        username: username.trim(),
+        email: normalizedEmail,
+        guest: false
+      };
+
+      req.session.save(saveError => {
+        if (saveError) {
+          return res.status(500).json({
+            error: "Could not save your session."
+          });
+        }
+
+        res.json({
+          success: true,
+          user: req.session.user
+        });
       });
     });
-  });
-});
+  })
+);
 
-app.post("/api/auth/logout", (req, res) => {
-  req.session.destroy(() => {
-    res.clearCookie("connect.sid");
-    res.json({ success: true });
-  });
-});
+app.post(
+  "/api/auth/login",
+  authLimiter,
+  asyncRoute(async (req, res) => {
+    const { email, password } = req.body || {};
+
+    if (
+      typeof email !== "string" ||
+      typeof password !== "string"
+    ) {
+      return res.status(400).json({
+        error: "Enter your email and password."
+      });
+    }
+
+    const user = await get(
+      "SELECT * FROM users WHERE email = ?",
+      [email.trim().toLowerCase()]
+    );
+
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json({
+        error: "Incorrect email or password."
+      });
+    }
+
+    req.session.regenerate(error => {
+      if (error) {
+        return res.status(500).json({
+          error: "Could not start your session."
+        });
+      }
+
+      req.session.user = {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        guest: false
+      };
+
+      req.session.save(saveError => {
+        if (saveError) {
+          return res.status(500).json({
+            error: "Could not save your session."
+          });
+        }
+
+        res.json({
+          success: true,
+          user: req.session.user
+        });
+      });
+    });
+  })
+);
+
+// GUEST ACCOUNT
+
+app.post(
+  "/api/auth/guest",
+  authLimiter,
+  (req, res) => {
+    req.session.regenerate(error => {
+      if (error) {
+        return res.status(500).json({
+          error: "Could not start Guest mode."
+        });
+      }
+
+      req.session.user = {
+        id: null,
+        username: "Guest",
+        email: null,
+        guest: true
+      };
+
+      req.session.save(saveError => {
+        if (saveError) {
+          return res.status(500).json({
+            error: "Could not save Guest session."
+          });
+        }
+
+        res.json({
+          success: true,
+          user: req.session.user
+        });
+      });
+    });
+  }
+);
+
+// CURRENT USER
 
 app.get("/api/auth/me", (req, res) => {
   res.set("Cache-Control", "no-store");
-  res.json({ user: req.session.user || null });
+
+  res.json({
+    user: req.session?.user || null
+  });
+});
+
+// LOGOUT
+
+app.post("/api/auth/logout", (req, res) => {
+  if (!req.session) {
+    return res.json({ success: true });
+  }
+
+  req.session.destroy(error => {
+    if (error) {
+      return res.status(500).json({
+        error: "Could not log out."
+      });
+    }
+
+    res.clearCookie("stacknetwork.sid", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax"
+    });
+
+    res.json({ success: true });
+  });
 });
 
 // FILE UPLOADS
@@ -339,18 +429,23 @@ async function searchWeb(query) {
     );
   }
 
-  const response = await fetch("https://api.tavily.com/search", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      api_key: process.env.TAVILY_API_KEY,
-      query,
-      max_results: 5,
-      search_depth: "basic",
-      include_answer: true
-    }),
-    signal: AbortSignal.timeout(20000)
-  });
+  const response = await fetch(
+    "https://api.tavily.com/search",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        api_key: process.env.TAVILY_API_KEY,
+        query,
+        max_results: 5,
+        search_depth: "basic",
+        include_answer: true
+      }),
+      signal: AbortSignal.timeout(20000)
+    }
+  );
 
   if (!response.ok) {
     throw new Error("Web search provider request failed.");
@@ -368,16 +463,19 @@ async function searchWeb(query) {
   };
 }
 
-// HEALTH AND CONFIGURATION
+// HEALTH
 
 app.get("/api/health", (req, res) => {
   res.set("Cache-Control", "no-store");
+
   res.json({
     status: "online",
     name: "StackNetwork AI",
     model: MODEL
   });
 });
+
+// CONFIGURATION
 
 app.get("/api/config", (req, res) => {
   res.json({
@@ -389,79 +487,111 @@ app.get("/api/config", (req, res) => {
 
 // REGISTERED USER CHAT HISTORY
 
-app.get("/api/chats", requireRegisteredUser, asyncRoute(async (req, res) => {
-  const chats = await all(
-    `SELECT id, title, updated_at
-     FROM chats
-     WHERE user_id = ?
-     ORDER BY updated_at DESC`,
-    [req.session.user.id]
-  );
+app.get(
+  "/api/chats",
+  requireRegisteredUser,
+  asyncRoute(async (req, res) => {
+    const chats = await all(
+      `SELECT id, title, updated_at
+       FROM chats
+       WHERE user_id = ?
+       ORDER BY updated_at DESC`,
+      [req.session.user.id]
+    );
 
-  res.json({ chats });
-}));
+    res.json({ chats });
+  })
+);
 
-app.get("/api/chats/:id", requireRegisteredUser, asyncRoute(async (req, res) => {
-  const chat = await get(
-    "SELECT * FROM chats WHERE id = ? AND user_id = ?",
-    [req.params.id, req.session.user.id]
-  );
+app.get(
+  "/api/chats/:id",
+  requireRegisteredUser,
+  asyncRoute(async (req, res) => {
+    const chat = await get(
+      "SELECT * FROM chats WHERE id = ? AND user_id = ?",
+      [req.params.id, req.session.user.id]
+    );
 
-  if (!chat) {
-    return res.status(404).json({ error: "Chat not found." });
-  }
-
-  let messages = [];
-
-  try {
-    messages = JSON.parse(chat.messages);
-  } catch {}
-
-  res.json({
-    chat: {
-      id: chat.id,
-      title: chat.title,
-      messages
+    if (!chat) {
+      return res.status(404).json({
+        error: "Chat not found."
+      });
     }
-  });
-}));
 
-app.put("/api/chats/:id", requireRegisteredUser, asyncRoute(async (req, res) => {
-  const { title } = req.body || {};
+    let messages = [];
 
-  if (typeof title !== "string" || !title.trim() || title.length > 100) {
-    return res.status(400).json({
-      error: "Enter a title up to 100 characters."
+    try {
+      messages = JSON.parse(chat.messages);
+    } catch {}
+
+    res.json({
+      chat: {
+        id: chat.id,
+        title: chat.title,
+        messages
+      }
     });
-  }
+  })
+);
 
-  const result = await run(
-    `UPDATE chats
-     SET title = ?, updated_at = CURRENT_TIMESTAMP
-     WHERE id = ? AND user_id = ?`,
-    [title.trim(), req.params.id, req.session.user.id]
-  );
+app.put(
+  "/api/chats/:id",
+  requireRegisteredUser,
+  asyncRoute(async (req, res) => {
+    const { title } = req.body || {};
 
-  if (!result.changes) {
-    return res.status(404).json({ error: "Chat not found." });
-  }
+    if (
+      typeof title !== "string" ||
+      !title.trim() ||
+      title.length > 100
+    ) {
+      return res.status(400).json({
+        error: "Enter a title up to 100 characters."
+      });
+    }
 
-  res.json({ success: true });
-}));
+    const result = await run(
+      `UPDATE chats
+       SET title = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND user_id = ?`,
+      [
+        title.trim(),
+        req.params.id,
+        req.session.user.id
+      ]
+    );
 
-app.delete("/api/chats/:id", requireRegisteredUser, asyncRoute(async (req, res) => {
-  await run(
-    "DELETE FROM chats WHERE id = ? AND user_id = ?",
-    [req.params.id, req.session.user.id]
-  );
+    if (!result.changes) {
+      return res.status(404).json({
+        error: "Chat not found."
+      });
+    }
 
-  res.json({ success: true });
-}));
+    res.json({ success: true });
+  })
+);
 
-// MAIN CHAT ENDPOINT — GUESTS AND REGISTERED USERS
+app.delete(
+  "/api/chats/:id",
+  requireRegisteredUser,
+  asyncRoute(async (req, res) => {
+    await run(
+      "DELETE FROM chats WHERE id = ? AND user_id = ?",
+      [
+        req.params.id,
+        req.session.user.id
+      ]
+    );
+
+    res.json({ success: true });
+  })
+);
+
+// MAIN AI CHAT — GUEST + REGISTERED
 
 app.post(
   "/api/chat",
+  chatLimiter,
   requireAuth,
   upload.array("files", 4),
   asyncRoute(async (req, res) => {
@@ -503,7 +633,8 @@ app.post(
       });
     }
 
-    const mode = req.body.mode === "thinking" ? "thinking" : "fast";
+    const mode =
+      req.body.mode === "thinking" ? "thinking" : "fast";
 
     const answerLength = [
       "short",
@@ -515,7 +646,10 @@ app.post(
 
     const persona = req.body.persona || "helpful";
     const style = req.body.style || "balanced";
-    const instructions = String(req.body.instructions || "").slice(0, 4000);
+
+    const instructions = String(
+      req.body.instructions || ""
+    ).slice(0, 4000);
 
     const personaText = {
       helpful: "Be helpful, friendly and accurate.",
@@ -545,10 +679,11 @@ app.post(
 
     if (req.body.webSearch === "true") {
       const search = await searchWeb(last.content);
+
       webResults = search.results;
 
       webContext = `
-WEB SEARCH RESULTS (untrusted reference material; verify and summarize):
+WEB SEARCH RESULTS:
 ${search.answer}
 ${search.results.map((r, i) =>
   `${i + 1}. ${r.title}\n${r.url}\n${r.content}`
@@ -589,7 +724,7 @@ ${mode === "thinking"
   : "Answer directly."}
 Custom instructions: ${instructions}
 ${webContext}
-When using web results, cite useful sources with their URLs in your answer.
+When using web results, cite useful sources with their URLs.
 Uploaded PDF text is user-provided reference material.
 `;
 
@@ -612,7 +747,10 @@ Uploaded PDF text is user-provided reference material.
     ];
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 90000);
+    const timeout = setTimeout(
+      () => controller.abort(),
+      90000
+    );
 
     let groqResponse;
 
@@ -625,7 +763,8 @@ Uploaded PDF text is user-provided reference material.
       };
 
       if (MODEL.toLowerCase().includes("gpt-oss")) {
-        body.reasoning_effort = mode === "thinking" ? "high" : "low";
+        body.reasoning_effort =
+          mode === "thinking" ? "high" : "low";
       }
 
       groqResponse = await fetch(
@@ -673,24 +812,31 @@ Uploaded PDF text is user-provided reference material.
       });
     }
 
-    const chatId = String(req.body.chatId || crypto.randomUUID());
+    const chatId = String(
+      req.body.chatId || crypto.randomUUID()
+    );
 
     const savedMessages = [
       ...messages.slice(-29),
-      { role: "assistant", content: reply.trim() }
+      {
+        role: "assistant",
+        content: reply.trim()
+      }
     ];
 
     const title = String(req.body.title || last.content)
       .replace(/\s+/g, " ")
       .slice(0, 70) || "New chat";
 
-    // IMPORTANT:
-    // Guest chats are stored in browser localStorage by the frontend.
-    // Only registered users are saved in the SQLite chats database.
+    // GUEST CHAT IS NOT SAVED TO REGISTERED USER DATABASE
 
-    if (!req.session.user.guest && req.session.user.id) {
+    if (
+      !req.session.user.guest &&
+      req.session.user.id
+    ) {
       await run(
-        `INSERT INTO chats (id, user_id, title, messages, updated_at)
+        `INSERT INTO chats
+          (id, user_id, title, messages, updated_at)
          VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
          ON CONFLICT(id) DO UPDATE SET
            title = excluded.title,
@@ -707,6 +853,7 @@ Uploaded PDF text is user-provided reference material.
     }
 
     res.json({
+      success: true,
       reply: reply.trim(),
       model: data.model || MODEL,
       chatId,
@@ -718,7 +865,9 @@ Uploaded PDF text is user-provided reference material.
 // UNKNOWN API ROUTES
 
 app.use("/api", (req, res) => {
-  res.status(404).json({ error: "API endpoint not found." });
+  res.status(404).json({
+    error: "API endpoint not found."
+  });
 });
 
 // STATIC WEBSITE
@@ -726,7 +875,9 @@ app.use("/api", (req, res) => {
 app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "index.html"));
+  res.sendFile(
+    path.join(__dirname, "public", "index.html")
+  );
 });
 
 // ERROR HANDLER
@@ -743,7 +894,15 @@ app.use((error, req, res, next) => {
   }
 
   if (error.message && error.message.includes("Only JPG")) {
-    return res.status(400).json({ error: error.message });
+    return res.status(400).json({
+      error: error.message
+    });
+  }
+
+  if (error.name === "AbortError") {
+    return res.status(504).json({
+      error: "AI request timed out. Please try again."
+    });
   }
 
   if (!res.headersSent) {
@@ -753,10 +912,13 @@ app.use((error, req, res, next) => {
   }
 });
 
+// START SERVER
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log("--------------------------------");
   console.log("StackNetwork AI is running!");
   console.log("Model: " + MODEL);
   console.log("Port: " + PORT);
+  console.log("Guest Account: Enabled");
   console.log("--------------------------------");
 });
