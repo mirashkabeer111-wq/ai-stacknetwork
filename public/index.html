@@ -91,7 +91,7 @@ body::after {
   to {background-position:350px 350px}
 }
 
-/* LOADING */
+/* LOADING SCREEN */
 
 #loadingScreen {
   position:fixed;
@@ -199,7 +199,7 @@ body::after {
 .loading-dots span:nth-child(3) {animation-delay:.4s}
 @keyframes dotBounce {to {opacity:.25;transform:translateY(-6px)}}
 
-/* APP */
+/* APPLICATION */
 
 .app {
   display:flex;
@@ -207,7 +207,6 @@ body::after {
   height:100%;
   height:100dvh;
   position:relative;
-  /* Removed z-index to fix mobile sidebar stacking */
 }
 
 /* SIDEBAR */
@@ -287,7 +286,9 @@ body::after {
   border:0;
   background:none;
   color:var(--muted);
-  padding:4px;
+  padding:5px;
+  min-width:28px;
+  min-height:28px;
 }
 
 .profile {
@@ -312,9 +313,9 @@ body::after {
 .profile-info {flex:1;min-width:0}
 .profile-info b {font-size:13px}
 .profile-info small {display:block;color:var(--muted);font-size:11px}
-.profile button {background:none;border:0;color:var(--muted)}
+.profile button {background:none;border:0;color:var(--muted);padding:8px}
 
-/* BACKDROP */
+/* MOBILE BACKDROP */
 
 #mobileBackdrop {display:none}
 
@@ -352,6 +353,8 @@ body::after {
   border:1px solid var(--border);
   border-radius:10px;
   padding:9px 11px;
+  min-height:38px;
+  min-width:38px;
 }
 
 .icon-btn:hover {border-color:var(--accent)}
@@ -368,6 +371,7 @@ body::after {
   scrollbar-width:thin;
   scrollbar-color:#39313f transparent;
   overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
 }
 
 .welcome {
@@ -436,7 +440,7 @@ body::after {
   box-shadow:0 8px 30px rgba(110,70,160,.15);
 }
 
-/* CHAT */
+/* CHAT MESSAGES */
 
 .message {
   max-width:850px;
@@ -482,7 +486,7 @@ body::after {
   background:transparent;
   border:1px solid var(--border);
   border-radius:7px;
-  padding:5px 8px;
+  padding:7px 9px;
   color:var(--muted);
 }
 
@@ -495,6 +499,7 @@ body::after {
   border-radius:12px;
   overflow:auto;
   max-width:100%;
+  -webkit-overflow-scrolling:touch;
 }
 
 .message-body code {font-family:Consolas,monospace}
@@ -538,6 +543,8 @@ body::after {
   padding:6px 9px;
   border-radius:8px;
   cursor:pointer;
+  max-width:100%;
+  overflow-wrap:anywhere;
 }
 
 .composer textarea {
@@ -568,6 +575,8 @@ body::after {
   border-radius:9px;
   padding:8px 10px;
   font-size:12px;
+  color:var(--text);
+  min-height:36px;
 }
 
 .tool-btn:hover {border-color:var(--accent)}
@@ -582,6 +591,7 @@ body::after {
   color:white;
   transition:.2s;
   flex-shrink:0;
+  min-height:40px;
 }
 
 .send-btn:hover {transform:translateY(-2px);filter:brightness(1.15)}
@@ -589,7 +599,7 @@ body::after {
 
 .hint {text-align:center;color:var(--muted);font-size:10px;margin-top:9px}
 
-/* AUTH */
+/* AUTHENTICATION */
 
 .auth-screen {
   position:fixed;
@@ -599,6 +609,8 @@ body::after {
   place-items:center;
   z-index:2000;
   padding:20px;
+  padding-top:max(20px,env(safe-area-inset-top));
+  padding-bottom:max(20px,env(safe-area-inset-bottom));
   overflow:auto;
 }
 
@@ -661,6 +673,7 @@ body::after {
 .preview-box {
   width:min(1000px,100%);
   height:min(85vh,750px);
+  height:min(85dvh,750px);
   background:#101012;
   border:1px solid var(--border);
   border-radius:16px;
@@ -675,6 +688,7 @@ body::after {
   display:flex;
   justify-content:space-between;
   align-items:center;
+  gap:10px;
 }
 
 .preview-box textarea {
@@ -687,9 +701,10 @@ body::after {
   resize:none;
   font-family:Consolas,monospace;
   outline:0;
+  font-size:13px;
 }
 
-.preview-box iframe {height:45%;background:white;border:0}
+.preview-box iframe {height:45%;background:white;border:0;min-height:120px}
 
 /* LIGHT THEME */
 
@@ -716,7 +731,7 @@ body.light .topbar {background:rgba(255,255,255,.6)}
 body.light .composer {background:rgba(255,255,255,.93)}
 body.light .composer textarea {color:#202027}
 body.light .suggestion {background:rgba(255,255,255,.8);color:#333}
-body.light .message-body pre {background:#eee}
+body.light .message-body pre {background:#eee;color:#222}
 body.light .auth-card {background:#fff}
 body.light .auth-card input {background:#f7f7f9;color:#202027}
 body.light .composer-wrap {background:linear-gradient(transparent,#f5f5f7 30%)}
@@ -724,6 +739,8 @@ body.light .tool-btn,
 body.light .icon-btn,
 body.light .new-chat,
 body.light .side-btn {background:#f0f0f3;color:#333}
+body.light .user-bubble {border-color:#ddd}
+body.light .message-actions button {color:#666}
 
 /* TABLET */
 
@@ -732,7 +749,7 @@ body.light .side-btn {background:#f0f0f3;color:#333}
   .messages {padding-left:15px;padding-right:15px}
 }
 
-/* MOBILE SIDEBAR FIX */
+/* MOBILE OPTIMIZATION */
 
 @media(max-width:760px) {
   html,body {
@@ -756,6 +773,8 @@ body.light .side-btn {background:#f0f0f3;color:#333}
     bottom:0;
     left:0;
     width:min(300px,85vw);
+    height:100%;
+    height:100dvh;
     z-index:1002;
     transform:translateX(-105%);
     transition:transform .28s ease;
@@ -763,6 +782,7 @@ body.light .side-btn {background:#f0f0f3;color:#333}
     padding-top:max(18px,env(safe-area-inset-top));
     padding-bottom:max(18px,env(safe-area-inset-bottom));
     box-shadow:15px 0 45px #0008;
+    overflow-y:auto;
   }
 
   .sidebar.open {transform:translateX(0)}
@@ -774,11 +794,17 @@ body.light .side-btn {background:#f0f0f3;color:#333}
     z-index:1001;
     background:#0009;
     backdrop-filter:blur(4px);
+    -webkit-backdrop-filter:blur(4px);
   }
 
   #menuBtn {display:block}
 
-  .main {width:100%;min-width:0;height:100%}
+  .main {
+    width:100%;
+    min-width:0;
+    height:100%;
+    height:100dvh;
+  }
 
   .topbar {
     height:58px;
@@ -789,6 +815,7 @@ body.light .side-btn {background:#f0f0f3;color:#333}
 
   .top-title {font-size:14px}
   .top-actions {gap:5px}
+  .status {font-size:10px}
 
   .messages {
     min-width:0;
@@ -798,7 +825,7 @@ body.light .side-btn {background:#f0f0f3;color:#333}
     min-height:0;
   }
 
-  .welcome {margin:8vh auto 0;width:100%}
+  .welcome {margin:5vh auto 0;width:100%}
   .welcome h1 {font-size:27px}
   .welcome p {font-size:13px;padding:0 8px}
   .welcome-logo {width:65px;height:65px}
@@ -809,11 +836,14 @@ body.light .side-btn {background:#f0f0f3;color:#333}
     margin-top:22px;
   }
 
-  .suggestion {padding:14px;font-size:13px}
+  .suggestion {
+    padding:14px;
+    font-size:13px;
+    min-height:46px;
+  }
 
   .message {width:100%;gap:8px;margin-bottom:20px}
   .message .avatar {width:29px;height:29px;font-size:11px}
-
   .message-body {min-width:0;font-size:14px;line-height:1.65}
   .user-bubble {font-size:14px;padding:10px 13px}
 
@@ -840,21 +870,66 @@ body.light .side-btn {background:#f0f0f3;color:#333}
     padding:9px 4px;
   }
 
-  .composer-bottom {align-items:center;flex-wrap:wrap;gap:7px}
-  .composer-tools {gap:5px;flex:1;min-width:0}
-  .tool-btn {font-size:11px;padding:9px 8px;min-height:36px}
+  .composer-bottom {
+    align-items:center;
+    flex-wrap:wrap;
+    gap:7px;
+  }
+
+  .composer-tools {
+    gap:5px;
+    flex:1;
+    min-width:0;
+  }
+
+  .tool-btn {
+    font-size:11px;
+    padding:9px 8px;
+    min-height:38px;
+  }
+
   .send-btn {min-height:38px;padding:9px 13px}
   .hint {font-size:9px;margin-top:7px}
 
   .overlay {padding:8px}
-  .preview-box {height:92dvh;width:100%}
+  .preview-box {
+    height:92vh;
+    height:92dvh;
+    width:100%;
+    border-radius:12px;
+  }
+
   .auth-card {padding:23px}
 }
+
+/* SMALL PHONES */
 
 @media(max-width:380px) {
   .tool-btn {padding:8px 6px;font-size:10px}
   .welcome h1 {font-size:23px}
   .top-title {font-size:12px}
+  .composer-tools {gap:4px}
+  .send-btn {padding:8px 10px}
+}
+
+/* LANDSCAPE PHONES */
+
+@media(max-width:760px) and (orientation:landscape) {
+  .welcome {margin:10px auto 0}
+  .welcome-logo {width:45px;height:45px;margin-bottom:5px}
+  .welcome h1 {font-size:23px}
+  .welcome p {margin:5px 0}
+  .suggestions {grid-template-columns:repeat(2,minmax(0,1fr));margin-top:12px}
+}
+
+/* ACCESSIBILITY */
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline:2px solid #a987d4;
+  outline-offset:2px;
 }
 
 @media(prefers-reduced-motion:reduce) {
@@ -862,6 +937,7 @@ body.light .side-btn {background:#f0f0f3;color:#333}
     animation-duration:.01ms!important;
     animation-iteration-count:1!important;
     scroll-behavior:auto!important;
+    transition-duration:.01ms!important;
   }
 }
 </style>
@@ -891,106 +967,106 @@ body.light .side-btn {background:#f0f0f3;color:#333}
 
 <div class="app" id="app">
 
-<aside class="sidebar" id="sidebar">
+  <aside class="sidebar" id="sidebar">
 
-  <div class="brand">
-    <img src="/logo.png" alt="StackNetwork AI" onerror="this.style.display='none'">
-    <div>
-      <div class="brand-name">StackNetwork AI</div>
-      <small>AI assistant</small>
-    </div>
-  </div>
-
-  <button class="new-chat" id="newChat">＋ &nbsp; New chat</button>
-
-  <div class="side-label">Your conversations</div>
-  <div class="history" id="history"></div>
-
-  <button class="side-btn" id="themeBtn">☾ &nbsp; Toggle theme</button>
-  <button class="side-btn" id="settingsBtn">⚙ &nbsp; Settings</button>
-
-  <div class="profile">
-    <div class="avatar" id="profileAvatar">S</div>
-    <div class="profile-info">
-      <b id="profileName">User</b>
-      <small>StackNetwork account</small>
-    </div>
-    <button id="logoutBtn" title="Log out">↪</button>
-  </div>
-
-</aside>
-
-<main class="main">
-
-  <header class="topbar">
-    <div style="display:flex;align-items:center;gap:12px">
-      <button class="icon-btn" id="menuBtn">☰</button>
-      <span class="top-title">StackNetwork AI</span>
-    </div>
-
-    <div class="top-actions">
-      <span class="status" id="status">● Online</span>
-      <button class="icon-btn" id="topTheme">☾</button>
-    </div>
-  </header>
-
-  <section class="messages" id="messages">
-
-    <div class="welcome" id="welcome">
-      <img src="/logo.png" class="welcome-logo" alt="StackNetwork AI" onerror="this.style.display='none'">
-      <h1>Welcome to <span class="gradient">StackNetwork AI</span></h1>
-      <p>Your personal AI assistant. Ask questions, explore ideas, write code and learn something new.</p>
-
-      <div class="suggestions">
-        <button class="suggestion">💻 Help me write HTML code</button>
-        <button class="suggestion">🎮 Give me Minecraft server ideas</button>
-        <button class="suggestion">📚 Explain a difficult topic</button>
-        <button class="suggestion">✨ Help me brainstorm a project</button>
+    <div class="brand">
+      <img src="/logo.png" alt="StackNetwork AI" onerror="this.style.display='none'">
+      <div>
+        <div class="brand-name">StackNetwork AI</div>
+        <small>AI assistant</small>
       </div>
     </div>
 
-  </section>
+    <button class="new-chat" id="newChat">＋ &nbsp; New chat</button>
 
-  <!-- MESSAGE COMPOSER -->
+    <div class="side-label">Your conversations</div>
+    <div class="history" id="history"></div>
 
-  <div class="composer-wrap">
-    <div class="composer">
+    <button class="side-btn" id="themeBtn">☾ &nbsp; Toggle theme</button>
+    <button class="side-btn" id="settingsBtn">⚙ &nbsp; Settings</button>
 
-      <div class="attachments" id="attachments"></div>
+    <div class="profile">
+      <div class="avatar" id="profileAvatar">S</div>
+      <div class="profile-info">
+        <b id="profileName">User</b>
+        <small>StackNetwork account</small>
+      </div>
+      <button id="logoutBtn" title="Log out">↪</button>
+    </div>
 
-      <textarea id="prompt" placeholder="Message StackNetwork AI..." rows="1"></textarea>
+  </aside>
 
-      <div class="composer-bottom">
-        <div class="composer-tools">
+  <main class="main">
 
-          <button class="tool-btn" id="attachBtn">＋ Attach</button>
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:12px">
+        <button class="icon-btn" id="menuBtn" aria-label="Open menu">☰</button>
+        <span class="top-title">StackNetwork AI</span>
+      </div>
 
-          <input
-            type="file"
-            id="fileInput"
-            class="hidden"
-            multiple
-            accept="image/png,image/jpeg,image/webp,application/pdf"
-          >
+      <div class="top-actions">
+        <span class="status" id="status">● Online</span>
+        <button class="icon-btn" id="topTheme" aria-label="Toggle theme">☾</button>
+      </div>
+    </header>
 
-          <button class="tool-btn" id="voiceBtn">🎙 Voice</button>
-          <button class="tool-btn" id="webBtn">⌕ Web search</button>
+    <section class="messages" id="messages">
 
-          <select class="tool-btn" id="mode">
-            <option value="fast">⚡ Fast</option>
-            <option value="thinking">🧠 Thinking</option>
-          </select>
+      <div class="welcome" id="welcome">
+        <img src="/logo.png" class="welcome-logo" alt="StackNetwork AI" onerror="this.style.display='none'">
+        <h1>Welcome to <span class="gradient">StackNetwork AI</span></h1>
+        <p>Your personal AI assistant. Ask questions, explore ideas, write code and learn something new.</p>
 
+        <div class="suggestions">
+          <button class="suggestion">💻 Help me write HTML code</button>
+          <button class="suggestion">🎮 Give me Minecraft server ideas</button>
+          <button class="suggestion">📚 Explain a difficult topic</button>
+          <button class="suggestion">✨ Help me brainstorm a project</button>
         </div>
-
-        <button class="send-btn" id="sendBtn">Send ↑</button>
       </div>
+
+    </section>
+
+    <!-- MESSAGE COMPOSER -->
+
+    <div class="composer-wrap">
+      <div class="composer">
+
+        <div class="attachments" id="attachments"></div>
+
+        <textarea id="prompt" placeholder="Message StackNetwork AI..." rows="1"></textarea>
+
+        <div class="composer-bottom">
+          <div class="composer-tools">
+
+            <button class="tool-btn" id="attachBtn">＋ Attach</button>
+
+            <input
+              type="file"
+              id="fileInput"
+              class="hidden"
+              multiple
+              accept="image/png,image/jpeg,image/webp,application/pdf"
+            >
+
+            <button class="tool-btn" id="voiceBtn">🎙 Voice</button>
+            <button class="tool-btn" id="webBtn">⌕ Web search</button>
+
+            <select class="tool-btn" id="mode" aria-label="Response mode">
+              <option value="fast">⚡ Fast</option>
+              <option value="thinking">🧠 Thinking</option>
+            </select>
+
+          </div>
+
+          <button class="send-btn" id="sendBtn">Send ↑</button>
+        </div>
+      </div>
+
+      <div class="hint">StackNetwork AI can make mistakes. Check important information.</div>
     </div>
 
-    <div class="hint">StackNetwork AI can make mistakes. Check important information.</div>
-  </div>
-
-</main>
+  </main>
 </div>
 
 <!-- LOGIN / REGISTER -->
@@ -1312,10 +1388,12 @@ function newChat() {
   selectedFiles = [];
 
   $("prompt").value = "";
+  $("prompt").style.height = "auto";
 
   renderMessages();
   renderFiles();
 
+  closeMobileSidebar();
   loadHistory().catch(()=>{});
 }
 
@@ -1646,6 +1724,7 @@ $("voiceBtn").onclick = ()=>{
     }
 
     $("prompt").value = result;
+    $("prompt").dispatchEvent(new Event("input"));
   };
 
   recognition.onend = ()=>{
@@ -1658,8 +1737,13 @@ $("voiceBtn").onclick = ()=>{
     $("voiceBtn").classList.remove("active");
   };
 
-  recognition.start();
-  $("voiceBtn").classList.add("active");
+  try {
+    recognition.start();
+    $("voiceBtn").classList.add("active");
+  } catch(error) {
+    recognition = null;
+    $("voiceBtn").classList.remove("active");
+  }
 };
 
 /* TEXT TO SPEECH */
@@ -1734,11 +1818,14 @@ if (localStorage.getItem("sn-theme")==="light") {
 function closeMobileSidebar() {
   $("sidebar").classList.remove("open");
   $("mobileBackdrop").classList.remove("show");
+  $("menuBtn").setAttribute("aria-expanded","false");
 }
 
 $("menuBtn").onclick = ()=>{
   const isOpen = $("sidebar").classList.toggle("open");
+
   $("mobileBackdrop").classList.toggle("show",isOpen);
+  $("menuBtn").setAttribute("aria-expanded",String(isOpen));
 };
 
 $("mobileBackdrop").onclick = closeMobileSidebar;
