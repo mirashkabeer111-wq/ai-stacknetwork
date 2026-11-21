@@ -1,32 +1,295 @@
 
 const express = require("express");
 const path = require("path");
+const fs = require("fs");
+const crypto = require("crypto");
+const session = require("express-session");
+const SQLiteStore = require("connect-sqlite3")(session);
+const sqlite3 = require("sqlite3").verbose();
+const bcrypt = require("bcryptjs");
+const multer = require("multer");
+const pdfParse = require("pdf-parse");
 
 const app = express();
-
 const PORT = process.env.PORT || 3000;
 const MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
 
-app.set("trust proxy", 1);
+const DATA_DIR = path.join(__dirname, "data");
+fs.mkdirSync(DATA_DIR, { recursive: true });
 
-// Security headers
+if (!process.env.SESSION_SECRET) {
+  console.error("SESSION_SECRET is required.");
+  process.exit(1);
+}
+
+if (!process.env.GROQ_API_KEY) {
+  console.warn("GROQ_API_KEY is not configured.");
+}
+
+app.set("trust proxy", 1);
+app.disable("x-powered-by");
+
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "SAMEORIGIN");
   res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
-  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  res.setHeader("Permissions-Policy", "camera=(), geolocation=()");
   next();
 });
 
-// Request body
 app.use(express.json({ limit: "1mb" }));
+app.use(express.static(path.join(__dirname, "public")));
 
-// Static website and logo
-app.use(express.static(path.join(__dirname, "public"), {
-  maxAge: "1h"
+const db = new sqlite3.Database(path.join(DATA_DIR, "stacknetwork.sqlite"));
+
+db.serialize(() => {
+  db.run("PRAGMA journal_mode = WAL");
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL,
+      email TEXT NOT NULL UNIQUE,
+      password TEXT NOT NULL,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS chats (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      messages TEXT NOT NULL,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(user_id) REFERENCES users(id)
+    )
+  `);
+});
+
+function run(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function (error) {
+      if (error) reject(error);
+      else resolve({ id: this.lastID, changes: this.changes });
+    });
+  });
+}
+
+function get(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (error, row) => {
+      if (error) reject(error);
+      else resolve(row);
+    });
+  });
+}
+
+function all(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (error, rows) => {
+      if (error) reject(error);
+      else resolve(rows);
+    });
+  });
+}
+
+app.use(session({
+  store: new SQLiteStore({
+    db: "sessions.sqlite",
+    dir: DATA_DIR,
+    concurrentDB: true
+  }),
+  secret: process.env.SESSION_SECRET,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: 7 * 24 * 60 * 60 * 1000
+  }
 }));
 
-// Health check
+function requireAuth(req, res, next) {
+  if (!req.session.user) {
+    return res.status(401).json({ error: "Please log in first." });
+  }
+  next();
+}
+
+function asyncRoute(fn) {
+  return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+}
+
+// Authentication
+
+app.post("/api/auth/register", asyncRoute(async (req, res) => {
+  const { username, email, password } = req.body || {};
+
+  if (
+    typeof username !== "string" ||
+    username.trim().length < 3 ||
+    username.trim().length > 24
+  ) {
+    return res.status(400).json({
+      error: "Username must be 3–24 characters."
+    });
+  }
+
+  if (
+    typeof email !== "string" ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
+    email.length > 254
+  ) {
+    return res.status(400).json({ error: "Enter a valid email." });
+  }
+
+  if (typeof password !== "string" || password.length < 8 || password.length > 72) {
+    return res.status(400).json({
+      error: "Password must be 8–72 characters."
+    });
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const existing = await get(
+    "SELECT id FROM users WHERE email = ?",
+    [normalizedEmail]
+  );
+
+  if (existing) {
+    return res.status(409).json({
+      error: "An account with this email already exists."
+    });
+  }
+
+  const hash = await bcrypt.hash(password, 12);
+
+  const result = await run(
+    "INSERT INTO users (username, email, password) VALUES (?, ?, ?)",
+    [username.trim(), normalizedEmail, hash]
+  );
+
+  req.session.user = {
+    id: result.id,
+    username: username.trim(),
+    email: normalizedEmail
+  };
+
+  res.json({ user: req.session.user });
+}));
+
+app.post("/api/auth/login", asyncRoute(async (req, res) => {
+  const { email, password } = req.body || {};
+
+  if (typeof email !== "string" || typeof password !== "string") {
+    return res.status(400).json({ error: "Enter your email and password." });
+  }
+
+  const user = await get(
+    "SELECT * FROM users WHERE email = ?",
+    [email.trim().toLowerCase()]
+  );
+
+  if (!user || !(await bcrypt.compare(password, user.password))) {
+    return res.status(401).json({
+      error: "Incorrect email or password."
+    });
+  }
+
+  req.session.regenerate((error) => {
+    if (error) {
+      return res.status(500).json({ error: "Could not start your session." });
+    }
+
+    req.session.user = {
+      id: user.id,
+      username: user.username,
+      email: user.email
+    };
+
+    req.session.save((saveError) => {
+      if (saveError) {
+        return res.status(500).json({ error: "Could not save your session." });
+      }
+      res.json({ user: req.session.user });
+    });
+  });
+}));
+
+app.post("/api/auth/logout", (req, res) => {
+  req.session.destroy(() => {
+    res.clearCookie("connect.sid");
+    res.json({ success: true });
+  });
+});
+
+app.get("/api/auth/me", (req, res) => {
+  res.json({ user: req.session.user || null });
+});
+
+// Uploads: images and PDFs
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 8 * 1024 * 1024,
+    files: 4
+  },
+  fileFilter: (req, file, callback) => {
+    const allowed = [
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "application/pdf"
+    ];
+
+    if (!allowed.includes(file.mimetype)) {
+      return callback(new Error("Only JPG, PNG, WEBP and PDF files are supported."));
+    }
+
+    callback(null, true);
+  }
+});
+
+// Web search through Tavily
+
+async function searchWeb(query) {
+  if (!process.env.TAVILY_API_KEY) {
+    throw new Error("Web search is not configured. Add TAVILY_API_KEY in Render.");
+  }
+
+  const response = await fetch("https://api.tavily.com/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      api_key: process.env.TAVILY_API_KEY,
+      query,
+      max_results: 5,
+      search_depth: "basic",
+      include_answer: true
+    }),
+    signal: AbortSignal.timeout(20000)
+  });
+
+  if (!response.ok) {
+    throw new Error("Web search provider request failed.");
+  }
+
+  const data = await response.json();
+
+  return {
+    answer: data.answer || "",
+    results: (data.results || []).map(item => ({
+      title: item.title,
+      url: item.url,
+      content: item.content
+    }))
+  };
+}
+
+// Health and configuration
+
 app.get("/api/health", (req, res) => {
   res.set("Cache-Control", "no-store");
   res.json({
@@ -36,329 +299,249 @@ app.get("/api/health", (req, res) => {
   });
 });
 
-// Website config
 app.get("/api/config", (req, res) => {
   res.json({
     name: "StackNetwork AI",
     developer: "Muhammad Ashmil",
-    logo: "/logo.png"
+    model: MODEL,
+    webSearchAvailable: Boolean(process.env.TAVILY_API_KEY)
   });
 });
 
-// Rate limiter
-const rateLimits = new Map();
-const RATE_LIMIT = 20;
-const RATE_WINDOW = 60 * 1000;
+// Chat history
 
-function chatRateLimit(req, res, next) {
-  const ip = req.ip || req.socket.remoteAddress || "unknown";
-  const now = Date.now();
-
-  let record = rateLimits.get(ip);
-
-  if (!record || now - record.start > RATE_WINDOW) {
-    record = { start: now, count: 0 };
-  }
-
-  record.count++;
-  rateLimits.set(ip, record);
-
-  res.setHeader("X-RateLimit-Limit", RATE_LIMIT);
-  res.setHeader(
-    "X-RateLimit-Remaining",
-    Math.max(0, RATE_LIMIT - record.count)
+app.get("/api/chats", requireAuth, asyncRoute(async (req, res) => {
+  const chats = await all(
+    `SELECT id, title, updated_at
+     FROM chats
+     WHERE user_id = ?
+     ORDER BY updated_at DESC`,
+    [req.session.user.id]
   );
 
-  if (record.count > RATE_LIMIT) {
-    const retryAfter = Math.max(
-      1,
-      Math.ceil((record.start + RATE_WINDOW - now) / 1000)
-    );
+  res.json({ chats });
+}));
 
-    res.setHeader("Retry-After", retryAfter);
+app.get("/api/chats/:id", requireAuth, asyncRoute(async (req, res) => {
+  const chat = await get(
+    "SELECT * FROM chats WHERE id = ? AND user_id = ?",
+    [req.params.id, req.session.user.id]
+  );
 
-    return res.status(429).json({
-      error: "Too many requests. Please wait a minute and try again."
-    });
+  if (!chat) {
+    return res.status(404).json({ error: "Chat not found." });
   }
 
-  next();
-}
-
-// Clean old rate-limit records
-setInterval(() => {
-  const now = Date.now();
-
-  for (const [ip, record] of rateLimits.entries()) {
-    if (now - record.start > RATE_WINDOW * 2) {
-      rateLimits.delete(ip);
-    }
-  }
-}, 5 * 60 * 1000).unref();
-
-// Chat API
-app.post("/api/chat", chatRateLimit, async (req, res) => {
-  let timeout;
-  let controller;
-  let onClientClose;
-  let clientDisconnected = false;
-  let timedOut = false;
-
+  let messages = [];
   try {
-    const {
-      messages,
-      instructions = "",
-      answerLength = "medium",
-      mode = "fast",
-      persona = "helpful",
-      style = "balanced"
-    } = req.body || {};
+    messages = JSON.parse(chat.messages);
+  } catch {}
 
-    // API key
+  res.json({
+    chat: {
+      id: chat.id,
+      title: chat.title,
+      messages
+    }
+  });
+}));
+
+app.put("/api/chats/:id", requireAuth, asyncRoute(async (req, res) => {
+  const { title } = req.body || {};
+
+  if (typeof title !== "string" || !title.trim() || title.length > 100) {
+    return res.status(400).json({ error: "Enter a title up to 100 characters." });
+  }
+
+  const result = await run(
+    "UPDATE chats SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?",
+    [title.trim(), req.params.id, req.session.user.id]
+  );
+
+  if (!result.changes) {
+    return res.status(404).json({ error: "Chat not found." });
+  }
+
+  res.json({ success: true });
+}));
+
+app.delete("/api/chats/:id", requireAuth, asyncRoute(async (req, res) => {
+  await run(
+    "DELETE FROM chats WHERE id = ? AND user_id = ?",
+    [req.params.id, req.session.user.id]
+  );
+
+  res.json({ success: true });
+}));
+
+// Main chat endpoint
+
+app.post(
+  "/api/chat",
+  requireAuth,
+  upload.array("files", 4),
+  asyncRoute(async (req, res) => {
     if (!process.env.GROQ_API_KEY) {
-      return res.status(500).json({
-        error: "GROQ_API_KEY is missing in Render Environment."
-      });
+      return res.status(500).json({ error: "GROQ_API_KEY is missing." });
     }
 
-    // Message validation
-    if (!Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({
-        error: "Please enter a message."
-      });
-    }
-
-    if (messages.length > 30) {
-      return res.status(400).json({
-        error: "Too many messages. Start a new conversation."
-      });
-    }
-
-    const validMessages = [];
-
-    for (const message of messages) {
-      if (
-        !message ||
-        !["user", "assistant"].includes(message.role) ||
-        typeof message.content !== "string" ||
-        !message.content.trim()
-      ) {
-        return res.status(400).json({
-          error: "Invalid message format."
-        });
-      }
-
-      if (message.content.length > 12000) {
-        return res.status(400).json({
-          error: "A message is too long. Please shorten it."
-        });
-      }
-
-      validMessages.push({
-        role: message.role,
-        content: message.content
-      });
-    }
-
-    if (validMessages[validMessages.length - 1].role !== "user") {
-      return res.status(400).json({
-        error: "The latest message must be from the user."
-      });
-    }
-
-    // Allowed settings
-    const allowedModes = ["fast", "thinking"];
-    const allowedLengths = ["short", "medium", "long"];
-
-    const allowedPersonas = [
-      "helpful",
-      "teacher",
-      "coder",
-      "creative",
-      "professional",
-      "gamer"
-    ];
-
-    const allowedStyles = [
-      "balanced",
-      "friendly",
-      "professional",
-      "simple",
-      "detailed"
-    ];
-
-    const safeMode = allowedModes.includes(mode) ? mode : "fast";
-    const safeLength = allowedLengths.includes(answerLength)
-      ? answerLength
-      : "medium";
-
-    const safePersona = allowedPersonas.includes(persona)
-      ? persona
-      : "helpful";
-
-    const safeStyle = allowedStyles.includes(style)
-      ? style
-      : "balanced";
-
-    const safeInstructions =
-      typeof instructions === "string"
-        ? instructions.slice(0, 4000)
-        : "";
-
-    // Personas
-    const personas = {
-      helpful: "You are a helpful and friendly AI assistant.",
-      teacher: "You are a patient teacher. Explain things clearly.",
-      coder: "You are an expert programming and coding assistant.",
-      creative: "You are a creative writing assistant.",
-      professional: "You are a professional AI assistant.",
-      gamer: "You are a gaming expert, especially in Minecraft."
-    };
-
-    // Answer lengths
-    const lengths = {
-      short: "Keep answers short and direct.",
-      medium: "Give balanced answers with useful details.",
-      long: "Give detailed answers with examples when useful."
-    };
-
-    // Response styles
-    const styles = {
-      balanced: "Use a natural balanced writing style.",
-      friendly: "Use a friendly conversational tone.",
-      professional: "Use a professional tone.",
-      simple: "Use simple language that is easy to understand.",
-      detailed: "Explain topics thoroughly with useful details."
-    };
-
-    // System prompt
-    const systemPrompt = `
-IDENTITY:
-- Your official name is StackNetwork AI.
-- You are StackNetwork AI, a friendly and intelligent AI assistant.
-- Never introduce yourself as ChatGPT.
-- If asked your name, say: "My name is StackNetwork AI."
-- If asked who developed you, say:
-  "I was developed for StackNetwork by Muhammad Ashmil."
-- Your underlying language model is provided by Groq.
-- Do not falsely claim to be a different AI model.
-
-DEVELOPER:
-Muhammad Ashmil
-
-PERSONALITY:
-- Be helpful, friendly, intelligent and accurate.
-- Understand the user's actual question.
-- Avoid unnecessary refusals.
-- Do not claim to have performed actions you cannot perform.
-
-SAFETY:
-- Allow harmless educational discussions, fictional stories,
-  historical discussions and cybersecurity learning.
-- Do not provide actionable instructions for real-world violence,
-  theft, fraud, malware deployment or unauthorized cyberattacks.
-- If a request crosses these boundaries, briefly refuse that part.
-
-PERSONA:
-${personas[safePersona]}
-
-ANSWER LENGTH:
-${lengths[safeLength]}
-
-RESPONSE STYLE:
-${styles[safeStyle]}
-
-MODE:
-${safeMode === "thinking"
-  ? "Think carefully before answering. Do not reveal private reasoning."
-  : "Answer quickly and directly."}
-
-CUSTOM INSTRUCTIONS:
-${safeInstructions}
-
-Always provide a visible final answer.
-`;
-
-    // Cancel request if client disconnects
-    controller = new AbortController();
-
-    onClientClose = () => {
-      if (!res.writableEnded) {
-        clientDisconnected = true;
-        controller.abort();
-      }
-    };
-
-    res.on("close", onClientClose);
-
-    timeout = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, 90000);
-
-    // Groq request
-    const requestBody = {
-      model: MODEL,
-      messages: [
-        {
-          role: "system",
-          content: systemPrompt
-        },
-        ...validMessages
-      ],
-      max_completion_tokens: 8192,
-      stream: false
-    };
-
-    if (MODEL.toLowerCase().includes("gpt-oss")) {
-      requestBody.reasoning_effort =
-        safeMode === "thinking" ? "high" : "low";
-    }
-
-    const groqResponse = await fetch(
-      "https://api.groq.com/openai/v1/chat/completions",
-      {
-        method: "POST",
-        signal: controller.signal,
-        headers: {
-          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(requestBody)
-      }
-    );
-
-    const raw = await groqResponse.text();
-
-    let data;
+    let messages;
 
     try {
-      data = JSON.parse(raw);
+      messages = JSON.parse(req.body.messages || "[]");
     } catch {
-      console.error("Invalid Groq JSON response.");
-
-      return res.status(502).json({
-        error: "Groq returned an invalid response."
-      });
+      return res.status(400).json({ error: "Invalid chat messages." });
     }
 
-    // Provider errors
+    if (!Array.isArray(messages) || messages.length === 0 || messages.length > 30) {
+      return res.status(400).json({ error: "Invalid message count." });
+    }
+
+    const last = messages[messages.length - 1];
+
+    if (!last || last.role !== "user" || typeof last.content !== "string") {
+      return res.status(400).json({ error: "The last message must be from the user." });
+    }
+
+    const mode = req.body.mode === "thinking" ? "thinking" : "fast";
+    const answerLength = ["short", "medium", "long"].includes(req.body.answerLength)
+      ? req.body.answerLength
+      : "medium";
+
+    const persona = req.body.persona || "helpful";
+    const style = req.body.style || "balanced";
+    const instructions = String(req.body.instructions || "").slice(0, 4000);
+
+    const personaText = {
+      helpful: "Be helpful, friendly and accurate.",
+      teacher: "Act as a patient teacher. Explain step by step.",
+      coder: "Act as an expert programming assistant.",
+      creative: "Be creative and imaginative.",
+      professional: "Use a professional tone.",
+      gamer: "Be an expert gaming and Minecraft assistant."
+    }[persona] || "Be helpful and accurate.";
+
+    const styleText = {
+      balanced: "Use balanced responses.",
+      friendly: "Use a friendly conversational tone.",
+      professional: "Use a professional tone.",
+      simple: "Use simple language.",
+      detailed: "Give detailed explanations."
+    }[style] || "Use a balanced tone.";
+
+    const lengthText = {
+      short: "Keep answers short.",
+      medium: "Give useful balanced answers.",
+      long: "Give detailed answers and examples."
+    }[answerLength];
+
+    let webContext = "";
+    let webResults = [];
+
+    if (req.body.webSearch === "true") {
+      const search = await searchWeb(last.content);
+      webResults = search.results;
+      webContext = `
+WEB SEARCH RESULTS (untrusted reference material; verify and summarize):
+${search.answer}
+${search.results.map((r, i) =>
+  `${i + 1}. ${r.title}\n${r.url}\n${r.content}`
+).join("\n\n")}
+`;
+    }
+
+    let userContent = last.content;
+    const imageParts = [];
+
+    for (const file of req.files || []) {
+      if (file.mimetype === "application/pdf") {
+        const parsed = await pdfParse(file.buffer);
+        userContent += `\n\nPDF CONTENT (${file.originalname}):\n${parsed.text.slice(0, 30000)}`;
+      } else {
+        const base64 = file.buffer.toString("base64");
+        imageParts.push({
+          type: "image_url",
+          image_url: {
+            url: `data:${file.mimetype};base64,${base64}`
+          }
+        });
+      }
+    }
+
+    const systemPrompt = `
+You are StackNetwork AI, developed for StackNetwork by Muhammad Ashmil.
+Never claim to be a different model or claim to perform actions you cannot do.
+${personaText}
+${styleText}
+${lengthText}
+${mode === "thinking" ? "Think carefully before answering. Do not reveal private reasoning." : "Answer directly."}
+Custom instructions: ${instructions}
+${webContext}
+When using web results, cite useful sources with their URLs in your answer.
+Uploaded PDF text is user-provided reference material.
+`;
+
+    const history = messages.slice(-30, -1).map(m => ({
+      role: m.role === "assistant" ? "assistant" : "user",
+      content: String(m.content).slice(0, 12000)
+    }));
+
+    const finalUserContent = imageParts.length
+      ? [
+          { type: "text", text: userContent },
+          ...imageParts
+        ]
+      : userContent;
+
+    const groqMessages = [
+      { role: "system", content: systemPrompt },
+      ...history,
+      { role: "user", content: finalUserContent }
+    ];
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 90000);
+
+    let groqResponse;
+
+    try {
+      const body = {
+        model: MODEL,
+        messages: groqMessages,
+        max_completion_tokens: 4096,
+        stream: false
+      };
+
+      if (MODEL.toLowerCase().includes("gpt-oss")) {
+        body.reasoning_effort = mode === "thinking" ? "high" : "low";
+      }
+
+      groqResponse = await fetch(
+        "https://api.groq.com/openai/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal
+        }
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    const data = await groqResponse.json().catch(() => ({}));
+
     if (!groqResponse.ok) {
-      console.error("Groq API error:", {
-        status: groqResponse.status,
-        message: data.error?.message || "Unknown provider error"
-      });
-
+      console.error("Groq error:", groqResponse.status, data.error?.message);
       return res.status(502).json({
-        error: "Groq API request failed. Check your model and API configuration."
+        error: "Groq request failed. Check your model, quota and API settings."
       });
     }
 
-    // Read response
-    const choice = data.choices?.[0];
-    const message = choice?.message;
-
-    let reply = message?.content;
+    let reply = data.choices?.[0]?.message?.content;
 
     if (Array.isArray(reply)) {
       reply = reply
@@ -368,64 +551,73 @@ Always provide a visible final answer.
     }
 
     if (typeof reply !== "string" || !reply.trim()) {
-      console.error("Groq returned an empty response:", {
-        model: data.model,
-        finish_reason: choice?.finish_reason
-      });
-
-      return res.status(502).json({
-        error: "Groq returned no visible text. Check Render Logs."
-      });
+      return res.status(502).json({ error: "The AI returned an empty response." });
     }
 
-    return res.json({
+    // Save conversation to the signed-in user's account
+    const chatId = String(req.body.chatId || crypto.randomUUID());
+    const savedMessages = [
+      ...messages.slice(-29),
+      { role: "assistant", content: reply.trim() }
+    ];
+
+    const title = String(req.body.title || last.content)
+      .replace(/\s+/g, " ")
+      .slice(0, 70) || "New chat";
+
+    await run(
+      `INSERT INTO chats (id, user_id, title, messages, updated_at)
+       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+       ON CONFLICT(id) DO UPDATE SET
+         title = excluded.title,
+         messages = excluded.messages,
+         updated_at = CURRENT_TIMESTAMP
+       WHERE chats.user_id = excluded.user_id`,
+      [
+        chatId,
+        req.session.user.id,
+        title,
+        JSON.stringify(savedMessages)
+      ]
+    );
+
+    res.json({
       reply: reply.trim(),
-      model: data.model
+      model: data.model || MODEL,
+      chatId,
+      webResults
     });
-
-  } catch (error) {
-    if (clientDisconnected) {
-      console.log("Client disconnected. Groq request cancelled.");
-      return;
-    }
-
-    if (timedOut || error.name === "AbortError") {
-      console.error("Groq request timed out.");
-
-      if (!res.headersSent && !res.destroyed) {
-        return res.status(504).json({
-          error: "The AI request timed out. Please try again."
-        });
-      }
-
-      return;
-    }
-
-    console.error("Chat server error:", error.message);
-
-    if (!res.headersSent && !res.destroyed) {
-      return res.status(500).json({
-        error: "An internal server error occurred. Please try again."
-      });
-    }
-
-  } finally {
-    if (timeout) clearTimeout(timeout);
-
-    if (onClientClose) {
-      res.removeListener("close", onClientClose);
-    }
-  }
-});
+  })
+);
 
 // Unknown API routes
 app.use("/api", (req, res) => {
-  res.status(404).json({
-    error: "API endpoint not found."
-  });
+  res.status(404).json({ error: "API endpoint not found." });
 });
 
-// Server
+// Error handler
+app.use((error, req, res, next) => {
+  console.error("Server error:", error.message);
+
+  if (error instanceof multer.MulterError) {
+    return res.status(400).json({
+      error: error.code === "LIMIT_FILE_SIZE"
+        ? "Each file must be 8 MB or smaller."
+        : "Too many files or upload limit exceeded."
+    });
+  }
+
+  if (error.message && error.message.includes("Only JPG")) {
+    return res.status(400).json({ error: error.message });
+  }
+
+  if (!res.headersSent) {
+    res.status(500).json({
+      error: "An internal server error occurred."
+    });
+  }
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log("--------------------------------");
   console.log("StackNetwork AI is running!");
