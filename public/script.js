@@ -25,7 +25,6 @@ async function api(url, options = {}) {
   });
 
   const contentType = response.headers.get("content-type") || "";
-
   let data = {};
 
   if (contentType.includes("application/json")) {
@@ -80,9 +79,7 @@ function applyTheme(theme) {
   const themeButton = $("themeBtn");
 
   if (themeButton) {
-    themeButton.textContent = selected === "dark"
-      ? "☀️"
-      : "🌙";
+    themeButton.textContent = selected === "dark" ? "☀️" : "🌙";
     themeButton.title = selected === "dark"
       ? "Switch to light mode"
       : "Switch to dark mode";
@@ -91,9 +88,7 @@ function applyTheme(theme) {
   const topTheme = $("topTheme");
 
   if (topTheme) {
-    topTheme.textContent = selected === "dark"
-      ? "☀️"
-      : "🌙";
+    topTheme.textContent = selected === "dark" ? "☀️" : "🌙";
   }
 
   const themeSelect = $("themeSelect");
@@ -139,20 +134,14 @@ function setUser(user) {
   const avatar = $("userAvatar");
   const accountType = $("accountType");
 
-  if (username) {
-    username.textContent = user.name;
-  }
+  if (username) username.textContent = user.name;
 
   if (avatar) {
-    avatar.textContent = (user.name || "U")
-      .charAt(0)
-      .toUpperCase();
+    avatar.textContent = (user.name || "U").charAt(0).toUpperCase();
   }
 
   if (accountType) {
-    accountType.textContent = user.guest
-      ? "Guest account"
-      : "Account";
+    accountType.textContent = user.guest ? "Guest account" : "Account";
   }
 }
 
@@ -172,7 +161,7 @@ async function checkSession() {
       if (state.chats.length) {
         await openChat(state.chats[0].id);
       } else {
-        newChat();
+        await newChat();
       }
     } else {
       showAuth();
@@ -186,9 +175,7 @@ async function checkSession() {
 async function login(email, password) {
   const data = await api("/api/login", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password })
   });
 
@@ -201,7 +188,7 @@ async function login(email, password) {
   if (state.chats.length) {
     await openChat(state.chats[0].id);
   } else {
-    newChat();
+    await newChat();
   }
 
   toast("Welcome back!");
@@ -210,9 +197,7 @@ async function login(email, password) {
 async function register(name, email, password) {
   const data = await api("/api/register", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, email, password })
   });
 
@@ -222,16 +207,14 @@ async function register(name, email, password) {
   await loadSettings();
   await loadChats();
 
-  newChat();
+  await newChat();
   toast("Account created!");
 }
 
 async function guestLogin() {
   const data = await api("/api/guest", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({})
   });
 
@@ -241,15 +224,13 @@ async function guestLogin() {
   await loadSettings();
   await loadChats();
 
-  newChat();
+  await newChat();
   toast("Welcome to StackNetwork!");
 }
 
 async function logout() {
   try {
-    await api("/api/logout", {
-      method: "POST"
-    });
+    await api("/api/logout", { method: "POST" });
 
     state.user = null;
     state.chats = [];
@@ -293,7 +274,6 @@ function syncSettingsControls() {
 
   for (const [id, key] of Object.entries(fields)) {
     const element = $(id);
-
     if (!element) continue;
 
     if (element.type === "checkbox") {
@@ -311,8 +291,7 @@ function syncSettingsControls() {
 }
 
 async function saveSettings() {
-  const theme = $("themeSelect")?.value ||
-    state.settings.theme;
+  const theme = $("themeSelect")?.value || state.settings.theme;
 
   const sendOnEnter = $("sendOnEnter")
     ? $("sendOnEnter").checked
@@ -341,12 +320,8 @@ async function saveSettings() {
   try {
     await api("/api/settings", {
       method: "PUT",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        settings: state.settings
-      })
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: state.settings })
     });
 
     applyTheme(state.settings.theme);
@@ -392,7 +367,6 @@ function createSettingsModal() {
       </div>
 
       <div class="settings-content">
-
         <section class="settings-section">
           <h3>Appearance</h3>
           <label for="themeSelect">Theme</label>
@@ -462,7 +436,6 @@ function createSettingsModal() {
           <p>Version 5.1.0</p>
           <p>AI chat powered by Groq.</p>
         </section>
-
       </div>
 
       <div class="settings-footer">
@@ -473,11 +446,11 @@ function createSettingsModal() {
   `;
 
   document.body.appendChild(modal);
-
   addSettingsStyles();
 
   $("closeSettingsBtn").onclick = closeSettings;
   $("cancelSettingsBtn").onclick = closeSettings;
+
   $("saveSettingsBtn").onclick = async () => {
     await saveSettings();
     closeSettings();
@@ -498,7 +471,6 @@ function addSettingsStyles() {
   if ($("settingsExtraStyles")) return;
 
   const style = document.createElement("style");
-
   style.id = "settingsExtraStyles";
 
   style.textContent = `
@@ -620,9 +592,7 @@ function addSettingsStyles() {
 async function loadChats() {
   try {
     const data = await api("/api/chats");
-
     state.chats = data.chats || [];
-
     renderChatHistory();
   } catch (error) {
     console.error(error);
@@ -631,14 +601,12 @@ async function loadChats() {
 
 function renderChatHistory() {
   const container = $("chatHistory");
-
   if (!container) return;
 
   container.innerHTML = "";
 
   state.chats.forEach(chat => {
     const item = document.createElement("button");
-
     item.className = "history-item";
 
     if (chat.id === state.chatId) {
@@ -647,7 +615,6 @@ function renderChatHistory() {
 
     item.textContent = chat.title || "New chat";
     item.dataset.chatId = chat.id;
-
     item.onclick = () => openChat(chat.id);
 
     container.appendChild(item);
@@ -657,12 +624,8 @@ function renderChatHistory() {
 async function createChat() {
   const data = await api("/api/chats", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      title: "New chat"
-    })
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: "New chat" })
   });
 
   return data.chat;
@@ -681,7 +644,6 @@ async function newChat() {
     $("welcome")?.classList.remove("hidden");
 
     const input = $("messageInput");
-
     if (input) input.focus();
 
     closeSidebar();
@@ -747,9 +709,7 @@ async function clearAllHistory() {
   }
 
   try {
-    await api("/api/chats", {
-      method: "DELETE"
-    });
+    await api("/api/chats", { method: "DELETE" });
 
     state.chats = [];
     state.messages = [];
@@ -770,9 +730,7 @@ async function deleteAccount() {
   }
 
   try {
-    await api("/api/account", {
-      method: "DELETE"
-    });
+    await api("/api/account", { method: "DELETE" });
 
     state.user = null;
     state.chatId = null;
@@ -793,46 +751,25 @@ function renderMarkdown(text) {
 
   output = output.replace(
     /```([\w-]*)\n?([\s\S]*?)```/g,
-    (_, language, code) =>
-      `<pre><code>${code.trim()}</code></pre>`
+    (_, language, code) => `<pre><code>${code.trim()}</code></pre>`
   );
 
-  output = output.replace(
-    /`([^`]+)`/g,
-    "<code>$1</code>"
-  );
-
-  output = output.replace(
-    /\*\*(.*?)\*\*/g,
-    "<strong>$1</strong>"
-  );
-
-  output = output.replace(
-    /\*(.*?)\*/g,
-    "<em>$1</em>"
-  );
-
-  output = output.replace(
-    /\n/g,
-    "<br>"
-  );
+  output = output.replace(/`([^`]+)`/g, "<code>$1</code>");
+  output = output.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+  output = output.replace(/\*(.*?)\*/g, "<em>$1</em>");
+  output = output.replace(/\n/g, "<br>");
 
   return output;
 }
 
 function renderMessages() {
   const container = $("messages");
-
   if (!container) return;
 
   container.innerHTML = "";
 
   state.messages.forEach(message => {
-    addMessageElement(
-      message.role,
-      message.content,
-      false
-    );
+    addMessageElement(message.role, message.content, false);
   });
 
   container.scrollTop = container.scrollHeight;
@@ -840,20 +777,18 @@ function renderMessages() {
 
 function addMessageElement(role, content, scroll = true) {
   const container = $("messages");
-
   if (!container) return;
 
   const wrapper = document.createElement("div");
-
-  wrapper.className = `message ${role === "user" ? "user-message" : "assistant-message"}`;
+  wrapper.className = `message ${
+    role === "user" ? "user-message" : "assistant-message"
+  }`;
 
   const avatar = document.createElement("div");
-
   avatar.className = "message-avatar";
   avatar.textContent = role === "user" ? "You" : "SN";
 
   const body = document.createElement("div");
-
   body.className = "message-content";
   body.innerHTML = renderMarkdown(content);
 
@@ -862,11 +797,9 @@ function addMessageElement(role, content, scroll = true) {
 
   if (role === "assistant") {
     const actions = document.createElement("div");
-
     actions.className = "message-actions";
 
     const copyButton = document.createElement("button");
-
     copyButton.textContent = "Copy";
     copyButton.title = "Copy response";
 
@@ -895,23 +828,31 @@ function addMessageElement(role, content, scroll = true) {
 /* -------------------- SEND MESSAGE -------------------- */
 
 function getSelectedFiles() {
-  return state.files || [];
+  // Prefer the validated files stored by handleFiles().
+  if (state.files.length > 0) {
+    return state.files;
+  }
+
+  // Fallback in case files exist in the browser input
+  // but were not copied into state.files.
+  return Array.from($("fileInput")?.files || []);
 }
 
 async function sendMessage() {
   if (state.sending) return;
 
   const input = $("messageInput");
-
   if (!input) return;
 
   const message = input.value.trim();
   const files = getSelectedFiles();
 
-  if (!message && !files.length) return;
+  if (!message && files.length === 0) {
+    toast("Please enter a message or attach a file.");
+    return;
+  }
 
   setLoading(true);
-
   $("welcome")?.classList.add("hidden");
 
   const userDisplay = message || "Uploaded file";
@@ -930,10 +871,7 @@ async function sendMessage() {
 
   formData.append("message", message);
   formData.append("chatId", state.chatId || "");
-  formData.append(
-    "mode",
-    $("modeSelect")?.value || "fast"
-  );
+  formData.append("mode", $("modeSelect")?.value || "fast");
 
   formData.append(
     "length",
@@ -947,12 +885,13 @@ async function sendMessage() {
     $("webBtn")?.classList.contains("active") ? "true" : "false"
   );
 
+  // IMPORTANT: This field name must match upload.array("files", 5)
+  // in server.js.
   files.forEach(file => {
-    formData.append("files", file);
+    formData.append("files", file, file.name);
   });
 
   const preview = $("attachmentPreview");
-
   if (preview) preview.innerHTML = "";
 
   state.files = [];
@@ -995,42 +934,57 @@ async function sendMessage() {
 /* -------------------- FILE UPLOADS -------------------- */
 
 function handleFiles(fileList) {
-  const files = Array.from(fileList || []);
+  const selectedFiles = Array.from(fileList || []);
+  const allowed = [];
 
-  const allowed = files.filter(file => {
+  for (const file of selectedFiles) {
+    const mime = file.type || "";
+
     const valid =
-      file.type.startsWith("image/") ||
-      file.type === "application/pdf" ||
-      file.type.startsWith("text/") ||
-      file.type === "application/json";
+      mime.startsWith("image/") ||
+      mime === "application/pdf" ||
+      mime.startsWith("text/") ||
+      mime === "application/json";
 
     if (!valid) {
       toast(`${file.name} is not supported.`);
+      continue;
     }
 
     if (file.size > 10 * 1024 * 1024) {
       toast(`${file.name} is larger than 10 MB.`);
-      return false;
+      continue;
     }
 
-    return valid;
-  });
+    allowed.push(file);
+  }
 
-  state.files = [...state.files, ...allowed].slice(0, 5);
+  const combined = [...state.files, ...allowed];
+
+  // Avoid adding the same file twice.
+  state.files = combined.filter((file, index, array) => {
+    return array.findIndex(other =>
+      other.name === file.name &&
+      other.size === file.size &&
+      other.lastModified === file.lastModified
+    ) === index;
+  }).slice(0, 5);
+
+  if (combined.length > 5) {
+    toast("You can attach a maximum of 5 files.");
+  }
 
   renderAttachmentPreview();
 }
 
 function renderAttachmentPreview() {
   const container = $("attachmentPreview");
-
   if (!container) return;
 
   container.innerHTML = "";
 
   state.files.forEach((file, index) => {
     const item = document.createElement("div");
-
     item.className = "attachment-item";
 
     const name = document.createElement("span");
@@ -1042,6 +996,13 @@ function renderAttachmentPreview() {
 
     remove.onclick = () => {
       state.files.splice(index, 1);
+
+      // Prevent the fallback file input from restoring
+      // an attachment the user has removed.
+      if (state.files.length === 0 && $("fileInput")) {
+        $("fileInput").value = "";
+      }
+
       renderAttachmentPreview();
     };
 
@@ -1101,9 +1062,7 @@ async function generateImage() {
   try {
     const data = await api("/api/images/generate", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt })
     });
 
@@ -1118,10 +1077,7 @@ async function generateImage() {
 
     toast("Image generated!");
   } catch (error) {
-    if (status) {
-      status.textContent = error.message;
-    }
-
+    if (status) status.textContent = error.message;
     toast(error.message);
   } finally {
     if (button) {
@@ -1162,7 +1118,6 @@ function startVoiceInput() {
 
   recognition.onresult = event => {
     const transcript = event.results[0][0].transcript;
-
     const input = $("messageInput");
 
     if (input) {
@@ -1285,31 +1240,20 @@ function setupChat() {
   });
 
   bind("imageBtn", "click", openImageModal);
-
   bind("generateImageBtn", "click", generateImage);
-
   bind("menuBtn", "click", toggleSidebar);
-
   bind("mobileBackdrop", "click", closeSidebar);
-
   bind("settingsBtn", "click", openSettings);
-
   bind("logoutBtn", "click", logout);
 
   bind("themeBtn", "click", () => {
-    const next = state.settings.theme === "dark"
-      ? "light"
-      : "dark";
-
+    const next = state.settings.theme === "dark" ? "light" : "dark";
     applyTheme(next);
     saveSettings();
   });
 
   bind("topTheme", "click", () => {
-    const next = state.settings.theme === "dark"
-      ? "light"
-      : "dark";
-
+    const next = state.settings.theme === "dark" ? "light" : "dark";
     applyTheme(next);
     saveSettings();
   });
@@ -1331,7 +1275,6 @@ async function initialize() {
 
   try {
     const config = await api("/api/config");
-
     document.title = config.appName || "StackNetwork";
   } catch {}
 
