@@ -1,3 +1,4 @@
+
 require("dotenv").config();
 
 const express = require("express");
@@ -8,58 +9,87 @@ const bcrypt = require("bcryptjs");
 const multer = require("multer");
 const crypto = require("crypto");
 const path = require("path");
+const fs = require("fs");
 
 const app = express();
-
 const PORT = process.env.PORT || 3000;
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
-const GROQ_MODEL = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
-const GROQ_VISION_MODEL =
-  process.env.GROQ_VISION_MODEL ||
-  "meta-llama/llama-4-scout-17b-16e-instruct";
 
-if (!GROQ_API_KEY) {
-  console.error("Missing GROQ_API_KEY in .env");
-  process.exit(1);
+if (!process.env.GROQ_API_KEY) {
+  console.warn("WARNING: GROQ_API_KEY is missing from your environment.");
 }
 
 app.set("trust proxy", 1);
-
 app.use(express.json({ limit: "2mb" }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 
-app.use(
-  session({
-    store: new SQLiteStore({
-      db: "sessions.sqlite",
-      dir: "./"
-    }),
-    secret: process.env.SESSION_SECRET || "change-this-secret",
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 1000 * 60 * 60 * 24 * 30
-    }
-  })
+// --------------------------------------------------
+// DATABASE
+// --------------------------------------------------
+
+const dataDirectory = path.join(__dirname, "data");
+
+if (!fs.existsSync(dataDirectory)) {
+  fs.mkdirSync(dataDirectory, { recursive: true });
+}
+
+const db = new sqlite3.Database(
+  path.join(dataDirectory, "stacknetwork.sqlite")
 );
 
-app.use(express.static(path.join(__dirname, "public")));
+db.serialize(() => {
+  db.run("PRAGMA journal_mode = WAL");
 
-const db = new sqlite3.Database("./stacknetwork.sqlite");
+  db.run(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL,
+      email TEXT UNIQUE NOT NULL,
+      password TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `);
 
-function run(sql, params = []) {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS chats (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT 'New chat',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chat_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  `);
+
+  db.run(`
+    CREATE INDEX IF NOT EXISTS idx_chats_user
+    ON chats(user_id, updated_at)
+  `);
+
+  db.run(`
+    CREATE INDEX IF NOT EXISTS idx_messages_chat
+    ON messages(chat_id, id)
+  `);
+});
+
+function dbRun(sql, params = []) {
   return new Promise((resolve, reject) => {
     db.run(sql, params, function (error) {
       if (error) return reject(error);
-      resolve({ id: this.lastID, changes: this.changes });
+      resolve({ lastID: this.lastID, changes: this.changes });
     });
   });
 }
 
-function get(sql, params = []) {
+function dbGet(sql, params = []) {
   return new Promise((resolve, reject) => {
     db.get(sql, params, (error, row) => {
       if (error) return reject(error);
@@ -68,7 +98,7 @@ function get(sql, params = []) {
   });
 }
 
-function all(sql, params = []) {
+function dbAll(sql, params = []) {
   return new Promise((resolve, reject) => {
     db.all(sql, params, (error, rows) => {
       if (error) return reject(error);
@@ -77,41 +107,52 @@ function all(sql, params = []) {
   });
 }
 
-async function initializeDatabase() {
-  await run(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      username TEXT UNIQUE NOT NULL,
-      email TEXT UNIQUE NOT NULL,
-      password TEXT NOT NULL,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+// --------------------------------------------------
+// SESSION
+// --------------------------------------------------
 
-  await run(`
-    CREATE TABLE IF NOT EXISTS chats (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      messages TEXT NOT NULL DEFAULT '[]',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+app.use(
+  session({
+    store: new SQLiteStore({
+      db: "sessions.sqlite",
+      dir: dataDirectory,
+      table: "sessions"
+    }),
+    secret: process.env.SESSION_SECRET || "replace-this-with-a-long-random-secret",
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    }
+  })
+);
 
-  console.log("StackNetwork database ready.");
+// --------------------------------------------------
+// HELPERS
+// --------------------------------------------------
+
+function cleanText(value, maxLength = 12000) {
+  return String(value || "").trim().slice(0, maxLength);
 }
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 10 * 1024 * 1024,
-    files: 5
-  }
-});
+function createId() {
+  return crypto.randomUUID();
+}
+
+function publicUser(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    email: user.email,
+    guest: !!user.guest
+  };
+}
 
 function requireAuth(req, res, next) {
-  if (!req.session.user) {
+  if (!req.session || !req.session.user) {
     return res.status(401).json({
       error: "Please log in or continue as a guest."
     });
@@ -120,134 +161,171 @@ function requireAuth(req, res, next) {
   next();
 }
 
-function cleanText(value, maxLength = 12000) {
-  if (typeof value !== "string") return "";
-  return value.trim().slice(0, maxLength);
+function requireRegisteredUser(req, res, next) {
+  if (!req.session?.user) {
+    return res.status(401).json({ error: "Please log in." });
+  }
+
+  if (req.session.user.guest) {
+    return res.status(403).json({
+      error: "Create an account to use this feature."
+    });
+  }
+
+  next();
 }
 
-function safeFileText(file) {
-  const allowed = [
-    ".txt",
-    ".md",
-    ".csv",
-    ".json",
-    ".js",
-    ".html",
-    ".css",
-    ".xml",
-    ".log"
-  ];
-
-  const ext = path.extname(file.originalname).toLowerCase();
-
-  if (!allowed.includes(ext)) return "";
-
-  return file.buffer.toString("utf8").slice(0, 20000);
+function validEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function isImage(file) {
-  return ["image/png", "image/jpeg", "image/webp"].includes(file.mimetype);
-}
+// --------------------------------------------------
+// FILE UPLOADS
+// --------------------------------------------------
 
-function getSystemPrompt(mode) {
-  const prompts = {
-    balanced:
-      "You are StackNetwork, a helpful, friendly and intelligent AI assistant. Give accurate and clear answers.",
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 8 * 1024 * 1024,
+    files: 4
+  },
+  fileFilter(req, file, callback) {
+    const allowed = [
+      "image/png",
+      "image/jpeg",
+      "image/webp",
+      "application/pdf"
+    ];
 
-    creative:
-      "You are StackNetwork, a creative AI assistant. Give imaginative, original and engaging answers.",
+    if (!allowed.includes(file.mimetype)) {
+      return callback(
+        new Error("Only PNG, JPG, WEBP and PDF files are supported.")
+      );
+    }
 
-    precise:
-      "You are StackNetwork, a precise AI assistant. Give direct, factual and concise answers.",
+    callback(null, true);
+  }
+});
 
-    coding:
-      "You are StackNetwork, an expert programming assistant. Provide correct code, explain important details, and use code blocks."
-  };
-
-  return prompts[mode] || prompts.balanced;
-}
-
-/* -------------------- AUTH -------------------- */
+// --------------------------------------------------
+// AUTH: CURRENT USER
+// --------------------------------------------------
 
 app.get("/api/me", (req, res) => {
+  if (!req.session?.user) {
+    return res.json({ user: null });
+  }
+
   res.json({
-    user: req.session.user || null
+    user: publicUser(req.session.user)
   });
 });
 
-app.post("/api/guest", (req, res) => {
-  req.session.user = {
-    id: "guest_" + crypto.randomUUID(),
-    username: "Guest",
-    email: null,
-    guest: true
-  };
+// --------------------------------------------------
+// AUTH: REGISTER
+// --------------------------------------------------
 
-  res.json({
-    success: true,
-    user: req.session.user
-  });
-});
-
-app.post("/api/auth/register", async (req, res) => {
+app.post("/api/register", async (req, res) => {
   try {
-    const username = cleanText(req.body.username, 30);
-    const email = cleanText(req.body.email, 120).toLowerCase();
+    const username = cleanText(req.body.username, 24);
+    const email = cleanText(req.body.email, 160).toLowerCase();
     const password = String(req.body.password || "");
 
-    if (!username || !email || password.length < 6) {
+    if (username.length < 3) {
       return res.status(400).json({
-        error: "Enter a username, valid email and password with at least 6 characters."
+        error: "Username must contain at least 3 characters."
       });
     }
 
-    const existing = await get(
-      "SELECT id FROM users WHERE username = ? OR email = ?",
-      [username, email]
+    if (!validEmail(email)) {
+      return res.status(400).json({
+        error: "Please enter a valid email address."
+      });
+    }
+
+    if (password.length < 8) {
+      return res.status(400).json({
+        error: "Password must contain at least 8 characters."
+      });
+    }
+
+    const existing = await dbGet(
+      "SELECT id FROM users WHERE email = ?",
+      [email]
     );
 
     if (existing) {
       return res.status(409).json({
-        error: "Username or email is already registered."
+        error: "An account with this email already exists."
       });
     }
 
-    const id = crypto.randomUUID();
+    const id = createId();
     const hashedPassword = await bcrypt.hash(password, 12);
 
-    await run(
-      "INSERT INTO users (id, username, email, password) VALUES (?, ?, ?, ?)",
-      [id, username, email, hashedPassword]
+    await dbRun(
+      `INSERT INTO users (id, username, email, password, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [id, username, email, hashedPassword, Date.now()]
     );
 
-    req.session.user = {
+    const user = {
       id,
       username,
       email,
       guest: false
     };
 
-    res.json({
-      success: true,
-      user: req.session.user
+    req.session.user = user;
+
+    req.session.save(error => {
+      if (error) {
+        console.error("Session save error:", error);
+        return res.status(500).json({
+          error: "Account created, but session could not be saved."
+        });
+      }
+
+      res.json({
+        success: true,
+        user: publicUser(user)
+      });
     });
   } catch (error) {
     console.error("Register error:", error);
-    res.status(500).json({ error: "Registration failed." });
+
+    res.status(500).json({
+      error: "Could not create your account."
+    });
   }
 });
 
-app.post("/api/auth/login", async (req, res) => {
+// --------------------------------------------------
+// AUTH: LOGIN
+// --------------------------------------------------
+
+app.post("/api/login", async (req, res) => {
   try {
-    const email = cleanText(req.body.email, 120).toLowerCase();
+    const email = cleanText(req.body.email, 160).toLowerCase();
     const password = String(req.body.password || "");
 
-    const user = await get(
+    const user = await dbGet(
       "SELECT * FROM users WHERE email = ?",
       [email]
     );
 
-    if (!user || !(await bcrypt.compare(password, user.password))) {
+    if (!user) {
+      return res.status(401).json({
+        error: "Incorrect email or password."
+      });
+    }
+
+    const passwordMatches = await bcrypt.compare(
+      password,
+      user.password
+    );
+
+    if (!passwordMatches) {
       return res.status(401).json({
         error: "Incorrect email or password."
       });
@@ -260,32 +338,86 @@ app.post("/api/auth/login", async (req, res) => {
       guest: false
     };
 
-    res.json({
-      success: true,
-      user: req.session.user
+    req.session.save(error => {
+      if (error) {
+        console.error("Login session error:", error);
+
+        return res.status(500).json({
+          error: "Could not save login session."
+        });
+      }
+
+      res.json({
+        success: true,
+        user: publicUser(req.session.user)
+      });
     });
   } catch (error) {
     console.error("Login error:", error);
-    res.status(500).json({ error: "Login failed." });
+
+    res.status(500).json({
+      error: "Login failed."
+    });
   }
 });
 
-app.post("/api/auth/logout", (req, res) => {
-  req.session.destroy(() => {
+// --------------------------------------------------
+// AUTH: GUEST
+// --------------------------------------------------
+
+app.post("/api/guest", (req, res) => {
+  const guest = {
+    id: "guest_" + createId(),
+    username: "Guest",
+    email: null,
+    guest: true
+  };
+
+  req.session.user = guest;
+
+  req.session.save(error => {
+    if (error) {
+      console.error("Guest session error:", error);
+
+      return res.status(500).json({
+        error: "Could not start guest session."
+      });
+    }
+
+    res.json({
+      success: true,
+      user: publicUser(guest)
+    });
+  });
+});
+
+// --------------------------------------------------
+// AUTH: LOGOUT
+// --------------------------------------------------
+
+app.post("/api/logout", (req, res) => {
+  req.session.destroy(error => {
+    if (error) {
+      console.error("Logout error:", error);
+
+      return res.status(500).json({
+        error: "Could not log out."
+      });
+    }
+
     res.clearCookie("connect.sid");
+
     res.json({ success: true });
   });
 });
 
-/* -------------------- CHAT HISTORY -------------------- */
+// --------------------------------------------------
+// CHAT HISTORY
+// --------------------------------------------------
 
-app.get("/api/chats", requireAuth, async (req, res) => {
+app.get("/api/chats", requireRegisteredUser, async (req, res) => {
   try {
-    if (req.session.user.guest) {
-      return res.json({ chats: [] });
-    }
-
-    const chats = await all(
+    const chats = await dbAll(
       `SELECT id, title, created_at, updated_at
        FROM chats
        WHERE user_id = ?
@@ -295,250 +427,528 @@ app.get("/api/chats", requireAuth, async (req, res) => {
 
     res.json({ chats });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Could not load chat history." });
+    console.error("Load chats error:", error);
+
+    res.status(500).json({
+      error: "Could not load chat history."
+    });
   }
 });
 
-app.get("/api/chats/:id", requireAuth, async (req, res) => {
-  try {
-    if (req.session.user.guest) {
-      return res.status(404).json({ error: "Chat not found." });
-    }
+// --------------------------------------------------
+// OPEN CHAT
+// --------------------------------------------------
 
-    const chat = await get(
-      "SELECT * FROM chats WHERE id = ? AND user_id = ?",
+app.get("/api/chats/:id", requireRegisteredUser, async (req, res) => {
+  try {
+    const chat = await dbGet(
+      `SELECT id, title, created_at, updated_at
+       FROM chats
+       WHERE id = ? AND user_id = ?`,
       [req.params.id, req.session.user.id]
     );
 
     if (!chat) {
-      return res.status(404).json({ error: "Chat not found." });
+      return res.status(404).json({
+        error: "Conversation not found."
+      });
     }
+
+    const messages = await dbAll(
+      `SELECT role, content, created_at
+       FROM messages
+       WHERE chat_id = ?
+       ORDER BY id ASC`,
+      [chat.id]
+    );
 
     res.json({
       chat: {
         ...chat,
-        messages: JSON.parse(chat.messages || "[]")
+        messages
       }
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: "Could not open chat." });
+    console.error("Open chat error:", error);
+
+    res.status(500).json({
+      error: "Could not open conversation."
+    });
   }
 });
 
-app.delete("/api/chats/:id", requireAuth, async (req, res) => {
+// --------------------------------------------------
+// RENAME CHAT
+// --------------------------------------------------
+
+app.put("/api/chats/:id", requireRegisteredUser, async (req, res) => {
   try {
-    if (!req.session.user.guest) {
-      await run(
-        "DELETE FROM chats WHERE id = ? AND user_id = ?",
-        [req.params.id, req.session.user.id]
-      );
+    const title = cleanText(req.body.title, 70);
+
+    if (!title) {
+      return res.status(400).json({
+        error: "Please enter a conversation title."
+      });
     }
+
+    const result = await dbRun(
+      `UPDATE chats
+       SET title = ?, updated_at = ?
+       WHERE id = ? AND user_id = ?`,
+      [title, Date.now(), req.params.id, req.session.user.id]
+    );
+
+    if (!result.changes) {
+      return res.status(404).json({
+        error: "Conversation not found."
+      });
+    }
+
+    res.json({ success: true, title });
+  } catch (error) {
+    console.error("Rename chat error:", error);
+
+    res.status(500).json({
+      error: "Could not rename conversation."
+    });
+  }
+});
+
+// --------------------------------------------------
+// DELETE CHAT
+// --------------------------------------------------
+
+app.delete("/api/chats/:id", requireRegisteredUser, async (req, res) => {
+  try {
+    const chat = await dbGet(
+      "SELECT id FROM chats WHERE id = ? AND user_id = ?",
+      [req.params.id, req.session.user.id]
+    );
+
+    if (!chat) {
+      return res.status(404).json({
+        error: "Conversation not found."
+      });
+    }
+
+    await dbRun("DELETE FROM messages WHERE chat_id = ?", [chat.id]);
+
+    await dbRun(
+      "DELETE FROM chats WHERE id = ? AND user_id = ?",
+      [chat.id, req.session.user.id]
+    );
 
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: "Could not delete chat." });
+    console.error("Delete chat error:", error);
+
+    res.status(500).json({
+      error: "Could not delete conversation."
+    });
   }
 });
 
-/* -------------------- GROQ CHAT -------------------- */
+// --------------------------------------------------
+// PDF TEXT EXTRACTION
+// Requires pdf-parse 1.1.1
+// --------------------------------------------------
+
+async function extractPdfText(buffer) {
+  try {
+    const pdfParse = require("pdf-parse");
+    const result = await pdfParse(buffer);
+
+    return cleanText(result.text, 15000);
+  } catch (error) {
+    console.error("PDF extraction error:", error);
+    return "[The PDF could not be read. Please describe the document or try another PDF.]";
+  }
+}
+
+// --------------------------------------------------
+// OPTIONAL WEB SEARCH (TAVILY)
+// --------------------------------------------------
+
+async function searchWeb(query) {
+  if (!process.env.TAVILY_API_KEY) {
+    return [];
+  }
+
+  try {
+    const response = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        api_key: process.env.TAVILY_API_KEY,
+        query,
+        search_depth: "basic",
+        max_results: 5,
+        include_answer: false
+      })
+    });
+
+    if (!response.ok) {
+      console.error("Tavily error:", await response.text());
+      return [];
+    }
+
+    const data = await response.json();
+
+    return (data.results || []).map(result => ({
+      title: cleanText(result.title, 200),
+      url: result.url,
+      content: cleanText(result.content, 1200)
+    }));
+  } catch (error) {
+    console.error("Web search error:", error);
+    return [];
+  }
+}
+
+// --------------------------------------------------
+// GROQ AI
+// --------------------------------------------------
+
+async function askGroq(messages, options = {}) {
+  const apiKey = process.env.GROQ_API_KEY;
+
+  if (!apiKey) {
+    throw new Error("Groq API key is missing. Add GROQ_API_KEY to your environment variables.");
+  }
+
+  const model =
+    options.model ||
+    process.env.GROQ_MODEL ||
+    "llama-3.3-70b-versatile";
+
+  const response = await fetch(
+    "https://api.groq.com/openai/v1/chat/completions",
+    {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: 0.7,
+        max_tokens: 4096
+      })
+    }
+  );
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    console.error("Groq API error:", data);
+
+    throw new Error(
+      data.error?.message || "Groq could not generate a response."
+    );
+  }
+
+  const answer = data.choices?.[0]?.message?.content;
+
+  if (!answer) {
+    throw new Error("Groq returned an empty response.");
+  }
+
+  return answer;
+}
+
+// --------------------------------------------------
+// CHAT API
+// --------------------------------------------------
 
 app.post(
   "/api/chat",
   requireAuth,
-  upload.array("files", 5),
+  upload.array("files", 4),
   async (req, res) => {
     try {
-      const message = cleanText(req.body.message, 12000);
+      const userId = req.session.user.id;
+
+      let incomingMessages = [];
+
+      try {
+        incomingMessages = JSON.parse(req.body.messages || "[]");
+      } catch {
+        return res.status(400).json({
+          error: "Invalid chat message format."
+        });
+      }
+
+      if (!Array.isArray(incomingMessages)) {
+        return res.status(400).json({
+          error: "Invalid messages."
+        });
+      }
+
+      incomingMessages = incomingMessages
+        .filter(message =>
+          message &&
+          ["user", "assistant"].includes(message.role) &&
+          typeof message.content === "string"
+        )
+        .slice(-30)
+        .map(message => ({
+          role: message.role,
+          content: cleanText(message.content, 12000)
+        }));
+
       const files = req.files || [];
 
-      if (!message && files.length === 0) {
+      if (!incomingMessages.length && !files.length) {
         return res.status(400).json({
           error: "Please enter a message or attach a file."
         });
       }
 
-      const user = req.session.user;
-      const mode = cleanText(req.body.mode, 30) || "balanced";
-      const requestedChatId = cleanText(req.body.chatId, 100);
+      const lastUserIndex = incomingMessages
+        .map(message => message.role)
+        .lastIndexOf("user");
 
-      let chatId = requestedChatId || crypto.randomUUID();
-      let previousMessages = [];
+      if (lastUserIndex === -1 && !files.length) {
+        return res.status(400).json({
+          error: "Please enter a message."
+        });
+      }
 
-      if (!user.guest && requestedChatId) {
-        const existingChat = await get(
-          "SELECT * FROM chats WHERE id = ? AND user_id = ?",
-          [requestedChatId, user.id]
+      let chatId = cleanText(req.body.chatId, 100);
+      const now = Date.now();
+
+      let chat = null;
+
+      if (chatId) {
+        chat = await dbGet(
+          "SELECT id FROM chats WHERE id = ? AND user_id = ?",
+          [chatId, userId]
         );
-
-        if (existingChat) {
-          previousMessages = JSON.parse(existingChat.messages || "[]");
-        } else {
-          chatId = crypto.randomUUID();
-        }
       }
 
-      let userContent = message || "Please analyze my attached file.";
-      let imageParts = [];
-      let fileText = "";
+      if (!chat) {
+        chatId = createId();
 
-      for (const file of files) {
-        if (isImage(file)) {
-          imageParts.push({
-            type: "image_url",
-            image_url: {
-              url: `data:${file.mimetype};base64,${file.buffer.toString("base64")}`
-            }
-          });
-        } else {
-          const extracted = safeFileText(file);
+        const title =
+          cleanText(req.body.title, 70) ||
+          incomingMessages.find(m => m.role === "user")?.content.slice(0, 70) ||
+          "New chat";
 
-          if (extracted) {
-            fileText += `\n\n--- File: ${file.originalname} ---\n${extracted}`;
-          } else {
-            fileText += `\n\n[File "${file.originalname}" could not be read as supported text.]`;
-          }
-        }
+        await dbRun(
+          `INSERT INTO chats (id, user_id, title, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          [chatId, userId, title, now, now]
+        );
+      } else {
+        await dbRun(
+          "UPDATE chats SET updated_at = ? WHERE id = ? AND user_id = ?",
+          [now, chatId, userId]
+        );
       }
 
-      if (fileText) {
-        userContent += "\n\nAttached file contents:\n" + fileText;
-      }
-
-      const userMessage = imageParts.length
-        ? {
-            role: "user",
-            content: [
-              { type: "text", text: userContent },
-              ...imageParts
-            ]
-          }
-        : {
-            role: "user",
-            content: userContent
-          };
-
-      const conversation = [
+      // Build a safe conversation for the AI.
+      const aiMessages = [
         {
           role: "system",
-          content: getSystemPrompt(mode)
+          content:
+            "You are StackNetwork, a helpful AI assistant. " +
+            "Never claim to be ChatGPT or another AI brand. " +
+            "Answer clearly, accurately, and helpfully. " +
+            "When writing code, provide complete and usable examples when appropriate."
         },
-        ...previousMessages.slice(-20),
-        userMessage
+        ...incomingMessages
       ];
 
-      const model = imageParts.length ? GROQ_VISION_MODEL : GROQ_MODEL;
+      // Add uploaded file contents to the latest user message.
+      let fileText = "";
+      const imageParts = [];
 
-      const groqResponse = await fetch(
-        "https://api.groq.com/openai/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${GROQ_API_KEY}`
-          },
-          body: JSON.stringify({
-            model,
-            messages: conversation,
-            temperature: mode === "creative" ? 0.9 : 0.6,
-            max_tokens: 4096
-          })
+      for (const file of files) {
+        if (file.mimetype === "application/pdf") {
+          const extracted = await extractPdfText(file.buffer);
+
+          fileText +=
+            `\n\nPDF FILE: ${file.originalname}\n${extracted}\n`;
         }
+
+        if (file.mimetype.startsWith("image/")) {
+          const visionModel = process.env.GROQ_VISION_MODEL;
+
+          if (!visionModel) {
+            fileText +=
+              `\n\nImage attached: ${file.originalname}. ` +
+              "Image understanding is not configured on this server. " +
+              "Set GROQ_VISION_MODEL to a currently supported Groq vision model to analyze images.\n";
+          } else {
+            imageParts.push({
+              type: "image_url",
+              image_url: {
+                url: `data:${file.mimetype};base64,${file.buffer.toString("base64")}`
+              }
+            });
+          }
+        }
+      }
+
+      if (fileText || imageParts.length) {
+        let userMessage = aiMessages
+          .slice()
+          .reverse()
+          .find(message => message.role === "user");
+
+        if (!userMessage) {
+          userMessage = {
+            role: "user",
+            content: "Please analyze my attached files."
+          };
+          aiMessages.push(userMessage);
+        }
+
+        const originalText =
+          typeof userMessage.content === "string"
+            ? userMessage.content
+            : "";
+
+        if (imageParts.length) {
+          userMessage.content = [
+            {
+              type: "text",
+              text: originalText + fileText +
+                "\nPlease analyze the attached image(s) and answer the user's request."
+            },
+            ...imageParts
+          ];
+        } else {
+          userMessage.content =
+            originalText + fileText;
+        }
+      }
+
+      // Optional web search.
+      let webResults = [];
+
+      if (String(req.body.webSearch) === "true") {
+        const query =
+          incomingMessages
+            .slice()
+            .reverse()
+            .find(message => message.role === "user")
+            ?.content || "";
+
+        if (query) {
+          webResults = await searchWeb(query);
+
+          if (webResults.length) {
+            const webContext = webResults
+              .map((result, index) =>
+                `${index + 1}. ${result.title}\n${result.content}\nURL: ${result.url}`
+              )
+              .join("\n\n");
+
+            aiMessages.splice(1, 0, {
+              role: "system",
+              content:
+                "Use the following web search results when relevant. " +
+                "Do not invent facts. Cite sources using their URLs.\n\n" +
+                webContext
+            });
+          }
+        }
+      }
+
+      // Thinking mode uses a configurable model.
+      const mode = cleanText(req.body.mode, 30);
+
+      const selectedModel =
+        mode === "thinking" && process.env.GROQ_THINKING_MODEL
+          ? process.env.GROQ_THINKING_MODEL
+          : undefined;
+
+      const reply = await askGroq(aiMessages, {
+        model: selectedModel
+      });
+
+      // Save the conversation for registered and guest sessions.
+      await dbRun(
+        "DELETE FROM messages WHERE chat_id = ?",
+        [chatId]
       );
 
-      const result = await groqResponse.json();
-
-      if (!groqResponse.ok) {
-        console.error("Groq error:", result);
-
-        return res.status(groqResponse.status).json({
-          error:
-            result.error?.message ||
-            "The AI provider could not complete your request."
-        });
-      }
-
-      const reply = result.choices?.[0]?.message?.content;
-
-      if (!reply) {
-        return res.status(502).json({
-          error: "The AI returned an empty response."
-        });
-      }
-
-      const savedMessages = [
-        ...previousMessages,
-        {
-          role: "user",
-          content: userContent
-        },
-        {
-          role: "assistant",
-          content: reply
-        }
-      ].slice(-50);
-
-      if (!user.guest) {
-        const title = (message || files[0]?.originalname || "New chat")
-          .slice(0, 70);
-
-        const existing = await get(
-          "SELECT id FROM chats WHERE id = ? AND user_id = ?",
-          [chatId, user.id]
+      for (const message of incomingMessages) {
+        await dbRun(
+          `INSERT INTO messages (chat_id, role, content, created_at)
+           VALUES (?, ?, ?, ?)`,
+          [chatId, message.role, message.content, Date.now()]
         );
-
-        if (existing) {
-          await run(
-            `UPDATE chats
-             SET messages = ?, updated_at = CURRENT_TIMESTAMP
-             WHERE id = ? AND user_id = ?`,
-            [JSON.stringify(savedMessages), chatId, user.id]
-          );
-        } else {
-          await run(
-            `INSERT INTO chats (id, user_id, title, messages)
-             VALUES (?, ?, ?, ?)`,
-            [chatId, user.id, title, JSON.stringify(savedMessages)]
-          );
-        }
       }
+
+      await dbRun(
+        `INSERT INTO messages (chat_id, role, content, created_at)
+         VALUES (?, ?, ?, ?)`,
+        [chatId, "assistant", reply, Date.now()]
+      );
 
       res.json({
         success: true,
+        chatId,
         reply,
-        answer: reply,
-        chatId
+        webResults
       });
     } catch (error) {
-      console.error("Chat error:", error);
+      console.error("Chat API error:", error);
 
-      if (error.code === "LIMIT_FILE_SIZE") {
+      if (error instanceof multer.MulterError) {
         return res.status(400).json({
-          error: "Each file must be 10 MB or smaller."
+          error: error.code === "LIMIT_FILE_SIZE"
+            ? "A file is too large. Maximum size is 8 MB."
+            : "File upload limit exceeded."
         });
       }
 
       res.status(500).json({
-        error: "Something went wrong while generating your response."
+        error: error.message || "Something went wrong while generating your response."
       });
     }
   }
 );
 
-/* -------------------- FALLBACK -------------------- */
+// --------------------------------------------------
+// ERROR HANDLER
+// --------------------------------------------------
+
+app.use((error, req, res, next) => {
+  console.error("Server error:", error);
+
+  if (res.headersSent) return next(error);
+
+  res.status(400).json({
+    error: error.message || "Request failed."
+  });
+});
+
+// --------------------------------------------------
+// STATIC WEBSITE
+// --------------------------------------------------
+
+app.use(express.static(path.join(__dirname, "public")));
 
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-initializeDatabase()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`StackNetwork running on port ${PORT}`);
-    });
-  })
-  .catch((error) => {
-    console.error("Database startup failed:", error);
-    process.exit(1);
-  });
+// --------------------------------------------------
+// START SERVER
+// --------------------------------------------------
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("====================================");
+  console.log("       StackNetwork AI Server       ");
+  console.log("====================================");
+  console.log(`Server running on port ${PORT}`);
+  console.log("Database: SQLite");
+  console.log("AI provider: Groq");
+  console.log("====================================");
+});
