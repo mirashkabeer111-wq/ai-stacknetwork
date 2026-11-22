@@ -412,7 +412,7 @@ async function enterGuest() {
   $("loginError").textContent = "";
 
   try {
-    const data = await jsonPost("/api/auth/guest", {});
+    const data = await jsonPost("/api/guest", {});
 
     if (!data.user || !data.user.guest) {
       throw new Error("Guest session was not created.");
@@ -451,7 +451,7 @@ async function enterGuest() {
 
 async function checkLogin() {
   try {
-    const data = await api("/api/auth/me");
+    const data = await api("/api/me");
 
     if (data.user) {
       user = data.user;
@@ -498,7 +498,7 @@ $("loginBtn").onclick = async () => {
   button.textContent = "Logging in...";
 
   try {
-    await jsonPost("/api/auth/login", {
+    await jsonPost("/api/login", {
       email: $("loginEmail").value.trim(),
       password: $("loginPassword").value
     });
@@ -524,7 +524,7 @@ $("registerBtn").onclick = async () => {
   button.textContent = "Creating account...";
 
   try {
-    await jsonPost("/api/auth/register", {
+    await jsonPost("/api/register", {
       username: $("registerName").value.trim(),
       email: $("registerEmail").value.trim(),
       password: $("registerPassword").value
@@ -546,7 +546,7 @@ $("registerBtn").onclick = async () => {
 $("logoutBtn").onclick = async () => {
   try {
     // Destroy the server session for both Guest and registered users.
-    await jsonPost("/api/auth/logout", {});
+    await jsonPost("/api/logout", {});
 
     user = null;
     isGuest = false;
