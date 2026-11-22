@@ -2,11 +2,10 @@
 {
   "name": "stacknetwork-ai",
   "version": "1.0.0",
-  "description": "StackNetwork AI Chat Website",
+  "description": "StackNetwork AI",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "node server.js"
   },
   "engines": {
     "node": ">=20"
