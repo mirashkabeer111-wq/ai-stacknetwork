@@ -321,6 +321,35 @@ function saveSession(req) {
 }
 
 // ================================================
+// STACKNETWORK PROJECT LINKS
+// ================================================
+
+const PROJECT_LINKS = [
+  {
+    keywords: ["open world", "openworld"],
+    url: "https://mirashkabeer111-wq.github.io/carasda/"
+  },
+  {
+    keywords: ["mech simulator", "machine simulator"],
+    url: "https://mirashkabeer111-wq.github.io/wdsa/"
+  },
+  {
+    keywords: ["30 games hub", "30 games", "games hub"],
+    url: "https://mirashkabeer111-wq.github.io/game/"
+  }
+];
+
+function getProjectLink(userMessage) {
+  const message = String(userMessage || "").toLowerCase();
+
+  const project = PROJECT_LINKS.find(project =>
+    project.keywords.some(keyword => message.includes(keyword))
+  );
+
+  return project ? project.url : null;
+}
+
+// ================================================
 // FILE UPLOADS
 // ================================================
 
@@ -992,9 +1021,20 @@ app.post(
         selectedModel = process.env.GROQ_THINKING_MODEL;
       }
 
-      const reply = await askStackNetwork(aiMessages, {
+      let reply = await askStackNetwork(aiMessages, {
         model: selectedModel
       });
+
+      // Return only the matching project link when requested
+      const latestUserMessage = incomingMessages
+        .filter(message => message.role === "user")
+        .pop()?.content || "";
+
+      const projectLink = getProjectLink(latestUserMessage);
+
+      if (projectLink) {
+        reply = projectLink;
+      }
 
       // Save messages
       await dbRun(
