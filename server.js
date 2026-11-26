@@ -324,6 +324,12 @@ function saveSession(req) {
 // STACKNETWORK PROJECT LINKS
 // ================================================
 
+const ALL_PROJECT_LINKS = [
+  "https://mirashkabeer111-wq.github.io/carasda/",
+  "https://mirashkabeer111-wq.github.io/wdsa/",
+  "https://mirashkabeer111-wq.github.io/game/"
+];
+
 const PROJECT_LINKS = [
   {
     keywords: ["open world", "openworld"],
@@ -339,9 +345,29 @@ const PROJECT_LINKS = [
   }
 ];
 
-function getProjectLink(userMessage) {
-  const message = String(userMessage || "").toLowerCase();
+function getProjectLinks(userMessage) {
+  const message = String(userMessage || "")
+    .toLowerCase()
+    .trim();
 
+  // Asking for links returns all three URLs.
+  const linkKeywords = [
+    "link",
+    "links",
+    "send links",
+    "all links",
+    "project links",
+    "website links",
+    "give links",
+    "show links",
+    "my links"
+  ];
+
+  if (linkKeywords.some(keyword => message.includes(keyword))) {
+    return ALL_PROJECT_LINKS.join("\n");
+  }
+
+  // Asking for a specific project returns only its URL.
   const project = PROJECT_LINKS.find(project =>
     project.keywords.some(keyword => message.includes(keyword))
   );
@@ -868,6 +894,14 @@ app.post(
         });
       }
 
+      const latestUserMessage = incomingMessages
+        .filter(message => message.role === "user")
+        .pop()?.content || "";
+
+      const automaticProjectReply = files.length
+        ? null
+        : getProjectLinks(latestUserMessage);
+
       let chatId = cleanText(req.body.chatId, 100);
       const now = Date.now();
 
@@ -885,7 +919,7 @@ app.post(
 
         const title =
           cleanText(req.body.title, 70) ||
-          incomingMessages.find(m => m.role === "user")?.content.slice(0, 70) ||
+          latestUserMessage.slice(0, 70) ||
           "New chat";
 
         await dbRun(
@@ -977,12 +1011,11 @@ app.post(
       // Optional web search
       let webResults = [];
 
-      if (String(req.body.webSearch) === "true") {
-        const query = incomingMessages
-          .slice()
-          .reverse()
-          .find(message => message.role === "user")
-          ?.content || "";
+      if (
+        !automaticProjectReply &&
+        String(req.body.webSearch) === "true"
+      ) {
+        const query = latestUserMessage;
 
         if (query) {
           webResults = await searchWeb(query);
@@ -1021,19 +1054,15 @@ app.post(
         selectedModel = process.env.GROQ_THINKING_MODEL;
       }
 
-      let reply = await askStackNetwork(aiMessages, {
-        model: selectedModel
-      });
+      // Automatic link reply or normal AI response
+      let reply;
 
-      // Return only the matching project link when requested
-      const latestUserMessage = incomingMessages
-        .filter(message => message.role === "user")
-        .pop()?.content || "";
-
-      const projectLink = getProjectLink(latestUserMessage);
-
-      if (projectLink) {
-        reply = projectLink;
+      if (automaticProjectReply) {
+        reply = automaticProjectReply;
+      } else {
+        reply = await askStackNetwork(aiMessages, {
+          model: selectedModel
+        });
       }
 
       // Save messages
